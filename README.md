@@ -247,7 +247,32 @@ A multi-arch image (amd64 and arm64) is published at
 configuration from `/etc/saguin/saguin.yaml`, and keeps data under
 `/var/lib/saguin`. In your configuration, point a SQLite provider's
 `file_path` (and a memory provider's `snapshot_dir`) there, and let the MQTT
-door listen on `0.0.0.0:1883`:
+door listen on `0.0.0.0:1883`. This one is enough to start; save it as
+`saguin.yaml` in the directory you run `docker run` from:
+
+```yaml
+broker:
+  id: saguin
+  mqtt:
+    listen:
+      tcp:
+        address: 0.0.0.0:1883    # 0.0.0.0: loopback in a container is the container
+  storage:
+    default: local
+    default_retention_period: 7d
+    default_retention_bytes: 1GiB
+    providers:
+      local:
+        type: sqlite
+        file_path: /var/lib/saguin/saguin.db
+
+channels:
+  events:
+    type: append
+    filter: sensors/+/readings
+```
+
+It admits every client, which is for trying it and nothing else. Then:
 
 ```sh
 docker run -d --name saguin -p 1883:1883 \
@@ -256,8 +281,11 @@ docker run -d --name saguin -p 1883:1883 \
   ghcr.io/ifnesi/saguin:0.1.0-rc.1
 ```
 
-The named volume `saguin-data` is writable by the image's user. A host
-directory mounted for the data must be writable by uid 10001.
+**The file must exist before `docker run`.** If it does not, Docker creates
+an empty directory named `saguin.yaml` in its place, and the broker exits with
+`read /etc/saguin/saguin.yaml: is a directory`; remove that directory and
+save the file. The named volume `saguin-data` is writable by the image's user.
+A host directory mounted for the data must be writable by uid 10001.
 
 To run it with [Sagüin viewer](https://github.com/ifnesi/saguin-viewer),
 [`examples/docker`](examples/docker/docker-compose.yml) is a compose file and the
