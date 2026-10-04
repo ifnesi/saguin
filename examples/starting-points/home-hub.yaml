@@ -1,0 +1,51 @@
+# A home hub on a Raspberry Pi: a few dozen devices, one sqlite file on the SD card, and no TLS inside the house.
+# A starting point to adapt, not an answer: paths and sizes are placeholders.
+# A test loads it, so its keys stay valid; the files it names are placeholders.
+
+broker:
+  id: home-hub
+  mqtt:
+    listen:
+      tcp:
+        address: 0.0.0.0:1883
+    # RFC 0002 "Who may connect": every device has a password, and no
+    # client connects without one.
+    password_file: /etc/saguin/clients.passwd
+    allow_anonymous: false
+  storage:
+    default: home
+    # RFC 0002 "Retention is stated once": a week of readings, bounded well
+    # inside the SD card.
+    default_retention_period: 7d
+    default_retention_bytes: 256MiB
+    providers:
+      home:
+        type: sqlite
+        file_path: /var/lib/saguin/home.db
+        max_bytes: 1GiB
+        # RFC 0002 "How a sqlite provider reads": each reader buys consumer
+        # throughput with memory and write-ahead log; a hub with a few
+        # consumers wants those back.
+        read_connections: 1
+        # RFC 0004 "WAL, and synchronous=NORMAL": how often the log is
+        # forced to disk, 10ms to 1s, absent for 150ms. Longer spares a
+        # consumer SD card; a power cut loses about one interval.
+        flush_interval: 150ms
+  # RFC 0002 "Retained messages on a broadcast topic": retained values on
+  # the sqlite file, so they survive a process crash.
+  retained:
+    storage: home
+    retention_period: none
+  limits:
+    # RFC 0002 "The largest CONNECT before authentication": a machine short
+    # of memory is better served by a lower max_connections.
+    max_connections: 200
+channels:
+  readings:
+    type: append
+    filter: home/+/readings/#
+  state:
+    type: latest
+    filter: home/+/state/#
+    # A current value is kept until it is replaced, however old.
+    retention_period: none

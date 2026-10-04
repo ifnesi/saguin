@@ -1,0 +1,270 @@
+# MQTT2Kafka.yaml - saguin -> Kafka bridge
+#
+# Consumes the three topic families published by the IoT simulator,
+# converts each protobuf payload back to JSON, and republishes to Kafka.
+#
+# Run from this directory, because import_paths below resolves from
+# Bento's working directory rather than from this file's location:
+#   bento -c MQTT2Kafka.yaml
+#
+# Or bring up the whole demo - saguin, Kafka and both connectors - with
+#   docker compose up
+
+input:
+  # `mqtt_v5`, not `mqtt`. Bento's older `mqtt` input speaks 3.1.1, which
+  # saguin accepts now - but a 3.1.1 subscriber is handed no user properties,
+  # so the broker's offset and the `schema` pointer this pipeline forwards
+  # into Kafka headers would not exist to forward. The component comes from a
+  # fork until warpstreamlabs/bento#991 merges; Dockerfile says which commit.
+  mqtt_v5:
+    # Overridden by docker-compose.yml to reach the saguin container; the
+    # default suits a Bento running on your own machine.
+    urls: [ "${MQTT_URLS:tcp://localhost:1883}" ]
+
+    # **These three settings together are what makes this a durable
+    # consumer**, and none of them works without the other two: a fixed
+    # client id for the broker to store a position against, clean start off
+    # so a stored position is resumed rather than discarded, and an expiry
+    # long enough to outlive the outage you want to survive.
+    #
+    # What they buy is the whole point of an `append` channel. Stop this
+    # container, leave the generator running, start it again, and every
+    # record published in between is delivered - from saguin's log, at the
+    # offset this consumer had reached, rather than from a buffer somebody
+    # had to size. Against a plain broker this was `clean_session: true` and
+    # those records were simply gone.
+    #
+    # It also means restarting the bridge produces records to Kafka that it
+    # has already produced, if it stopped between receiving one and
+    # acknowledging it. That is at-least-once behaving as promised.
+    client_id: "bento_mqtt_kafka_bridge"
+    clean_start: false
+    session_expiry_interval: 1h
+
+    topics:
+      # Each of these is inside one saguin channel's filter - see
+      # saguin.yaml. The two measurement families are `append` channels and
+      # this consumer keeps a position in each; water-location is a `latest`
+      # channel and has no position to keep, so a fresh subscription is
+      # served the current value of all 100 topics however long ago they
+      # were sent.
+      - "iot/weather/measurement/+"
+      - "iot/water/measurement/+"
+      - "iot/water/location/+"
+      # **The dead-letter channel a queue derives, carried out as its own
+      # Kafka topic.** It is an ordinary `append` channel in every respect
+      # except that only the queue writes to it, so it is read like any
+      # other - and work that failed is exactly what somebody wants outside
+      # the broker, beside the records that succeeded. Each record carries
+      # `saguin-dlq-reason`, `saguin-dlq-attempts` and the offset it held in
+      # the queue, which is what a redrive needs to put it back.
+      #
+      # The channel is still called `jobs__dlq` - a name is what a snapshot
+      # file and a seek topic are built from - but the *topic* is the
+      # queue's own with a `__dlq` level appended, which is what puts a dead
+      # letter inside a filter a subscriber can write. The queue's filter is
+      # `iot/tasks/+/+`, so its dead letters are one level deeper and the
+      # routing below matches on the suffix.
+      - "iot/tasks/+/+/__dlq"
+
+      # **The schema registry, carried out beside the records it defines.**
+      # It is the `schemas` channel: a `latest` channel holding the current
+      # definition of each schema, which is what a consumer of the topics
+      # above needs to read them - every reading carries a `schema` user
+      # property naming the topic here that defines it.
+      #
+      # Without this the Kafka side has the payloads and not the thing that
+      # says what they mean, so a consumer outside the broker has to be told
+      # out of band - which is the second service a schema registry in a
+      # `latest` channel exists to avoid.
+      #
+      # A `latest` channel keeps no consumer position, so a fresh
+      # subscription is served the current value of every schema however
+      # long ago it was published.
+      - "schemas/#"
+
+    # QoS 1 both ways: at-least-once from the broker, and the acknowledgement
+    # is what advances this consumer's stored position. At QoS 0 there is
+    # nothing to advance and nothing to resume.
+    qos: 1
+
+pipeline:
+  processors:
+    # The mqtt_v5 input attaches mqtt_topic, mqtt_qos, mqtt_duplicate,
+    # mqtt_retained and mqtt_message_id as metadata, and **adds every MQTT 5
+    # user property the publisher sent under its own name**. These ride
+    # along through every processor untouched and become the Kafka headers
+    # at the bottom of this file.
+    #
+    # **Carried, and never routed on.** A user property is what the sender
+    # said about itself; the topic is where the record actually is. Nothing
+    # in this file decides anything from the first kind.
+
+    # **Pick the protobuf message by the topic, which is what decides where
+    # a record lives.**
+    #
+    # It does not switch on `msg_type`, a user property the publisher sets.
+    # That is a fine thing to *carry* - it travels to Kafka as a header, and
+    # the page that renders these reads it - but it is the wrong thing to
+    # route on: a bridge that deserializes by what the sender declared about
+    # itself deserializes whatever it is told, and a publisher that sets the
+    # wrong one has its records read as the wrong shape by every consumer
+    # downstream.
+    #
+    # The topic is not a claim. saguin decides which channel a topic belongs
+    # to from the operator's filters (invariant 12), and the same prefixes
+    # below already choose the Kafka topic a few processors down - so the
+    # two switches now agree by construction rather than by two people
+    # keeping them in step.
+    - switch:
+        - check: 'metadata("mqtt_topic").has_prefix("iot/weather/measurement/")'
+          processors:
+            - protobuf:
+                operator: to_json
+                message: iot.WeatherMeasurement
+                import_paths: [ "./schema" ]
+                use_proto_names: true   # keep our snake_case field names
+
+        - check: 'metadata("mqtt_topic").has_prefix("iot/water/measurement/")'
+          processors:
+            - protobuf:
+                operator: to_json
+                message: iot.WaterMeasurement
+                import_paths: [ "./schema" ]
+                use_proto_names: true
+
+        - check: 'metadata("mqtt_topic").has_prefix("iot/water/location/")'
+          processors:
+            - protobuf:
+                operator: to_json
+                message: iot.WaterLocation
+                import_paths: [ "./schema" ]
+                use_proto_names: true
+
+        # A dead-lettered job is already JSON - traffic.py publishes it that
+        # way - and its topic matches none of the three above, so it would
+        # fall through untouched anyway. It is named here so a reader can see
+        # it was thought about rather than forgotten.
+        #
+        # **`noop`, not an empty list.** Bento refuses a case with no
+        # processors at load time - "case has no processors, in order to
+        # have a no-op case use a `noop` processor" - and it refuses it by
+        # exiting, so the pipeline that carries every record to Kafka does
+        # not start at all.
+        - check: 'metadata("mqtt_topic").has_suffix("/__dlq")'
+          processors:
+            - noop: {}
+
+    # **The MQTT topic to Kafka topic mapping, written out in full.**
+    #
+    # The three saguin channels are named after the three Kafka topics,
+    # which keeps this block readable - but a channel name is not any part
+    # of the MQTT topic, so the mapping cannot be derived from one and
+    # has to be written. That is the thing worth seeing anyway: put your own
+    # topics on the left and your own Kafka topics on the right and nothing
+    # else in this file changes.
+    #
+    # **These read the topic, which is what decides the channel.** They match
+    # a whole prefix ending in a separator rather than a substring, so
+    # `iot/water/` and `iot/weather/` cannot be confused with each other -
+    # which a bare `contains` would get wrong on exactly these two names.
+    - switch:
+        - check: 'metadata("mqtt_topic").has_prefix("iot/weather/measurement/")'
+          processors:
+            - mapping: 'meta route_kafka_topic = "weather-measurement"'
+
+        - check: 'metadata("mqtt_topic").has_prefix("iot/water/measurement/")'
+          processors:
+            - mapping: 'meta route_kafka_topic = "water-measurement"'
+
+        - check: 'metadata("mqtt_topic").has_prefix("iot/water/location/")'
+          processors:
+            - mapping: 'meta route_kafka_topic = "water-location"'
+
+        # A `__` in a channel name is legal; a `__` in a Kafka topic name is
+        # legal too, but it reads as a typo, so this is the one row where the
+        # two names deliberately differ - which is the reason the mapping is
+        # written out rather than derived.
+        - check: 'metadata("mqtt_topic").has_suffix("/__dlq")'
+          processors:
+            - mapping: 'meta route_kafka_topic = "jobs-dlq"'
+
+        # The registry, keyed by its own topic so the compacted Kafka topic
+        # holds one record per schema - the same shape the channel has.
+        - check: 'metadata("mqtt_topic").has_prefix("schemas/")'
+          processors:
+            - mapping: 'meta route_kafka_topic = "schemas"'
+
+    # Kafka key = the full original mqtt topic (device id included), so
+    # per-device identity and ordering-by-device (same key -> same
+    # partition) both come for free without needing per-device topics.
+    #
+    # **The key is the MQTT topic, so changing the topic layout repartitions
+    # Kafka and changes what compaction on `water-location` treats as one
+    # key.** Worth knowing before editing a filter in saguin.yaml: the
+    # broker's own records stay where they are, and the Kafka side does not.
+    - mapping: 'meta route_kafka_key = metadata("mqtt_topic")'
+
+output:
+  kafka_franz:
+    # Same story as the mqtt urls above: docker-compose.yml points this at
+    # the kafka container's internal listener, kafka:29092.
+    seed_brokers: [ "${KAFKA_SEED_BROKERS:localhost:9092}" ]
+    client_id: "bento_mqtt_kafka_bridge"
+
+    topic: '${! metadata("route_kafka_topic") }'
+    key: '${! metadata("route_kafka_key") }'
+
+    # What the MQTT side said, and nothing this file invented: the delivery
+    # fields the input attaches (mqtt_qos, mqtt_topic, mqtt_duplicate,
+    # mqtt_retained, mqtt_message_id) and the user properties the publisher
+    # sent - `msg_type` and `schema`. The route_* metadata is plumbing and is
+    # deliberately left behind.
+    #
+    # **Carried, and never routed on.** Those two say what the sender claims
+    # about its own record, which is worth passing to a consumer and is not
+    # worth deciding anything from: every switch in this file reads
+    # `mqtt_topic`, because where a record is cannot be misdeclared.
+    #
+    # **`saguin-` carries what the broker itself said, and the dead-letter
+    # channel is why it matters.** Those records arrive with
+    # `saguin-dlq-reason`, `saguin-dlq-attempts`, `saguin-dlq-channel` and
+    # `saguin-dlq-offset` - which queue the work came from, how many
+    # attempts it had and why it was given up on. Dropped here, the Kafka
+    # topic holds a payload nobody can trace: `jobs-dlq` would say a job
+    # failed and nothing about which job, from where, or why. The identity
+    # and position travel with them (`saguin-id`, `saguin-offset`,
+    # `saguin-timestamp`), so a consumer can deduplicate and correlate back
+    # to the broker.
+    #
+    # Prefixes rather than one rule, because kafka_franz's filter can only
+    # say what to include - there is no "everything except route_" to write
+    # here.
+    metadata:
+      include_prefixes: [ "mqtt_", "msg_type", "schema", "saguin-" ]
+
+    # Bounds what the producer holds before it pushes back on the pipeline,
+    # rather than letting a slow broker become unbounded memory.
+    #
+    # **Bento 1.21.0 read the broker write bound out of this setting**, so
+    # leaving it unset gave a bound of 0 and refused every connection.
+    # 1.21.1 fixed that and this stack builds on top of it, so the line means
+    # exactly what its name says; point BENTO_REF at anything older and it
+    # is the line that makes the output connect.
+    max_buffered_bytes: 100MiB
+
+    # --- Confluent Platform, localhost, plaintext, no auth (current target) ---
+    tls:
+      enabled: false
+    # sasl: left unset -> no authentication
+
+    # --- Uncomment instead to point this same output at Confluent Cloud ---
+    # (or any SASL_SSL Kafka target) and comment out the two lines above.
+    # Fill in real values, or better, pass them via -e/--set or env vars
+    # at deploy time rather than hardcoding here.
+    # tls:
+    #   enabled: true
+    # sasl:
+    #   - mechanism: PLAIN
+    #     username: "CONFLUENT_API_KEY_HERE"
+    #     password: "CONFLUENT_API_SECRET_HERE"

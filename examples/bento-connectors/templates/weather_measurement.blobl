@@ -1,0 +1,46 @@
+# weather_measurement.blobl
+#
+# One truck device per invocation, round-robin over trk-001 .. trk-100.
+# First time a device is seen its baseline is randomised; every tick after
+# that it drifts from its own last cached reading.
+import "../lib/gauss.blobl"
+
+let idx       = counter(min: 0, max: 99)
+let device_id = "trk-%03d".format($idx + 1)
+
+let cached = cache_get(resource: "weather_state", key: $device_id).catch(null)
+let prev   = if $cached != null { $cached.parse_json() } else { null }
+
+let base_temp = if $prev != null { $prev.temperature } else { random_int(min: 15, max: 32).number() }
+let base_hum  = if $prev != null { $prev.humidity }    else { random_int(min: 30, max: 70).number() }
+let base_lat  = if $prev != null { $prev.latitude }    else { fake("latitude").number() }
+let base_lon  = if $prev != null { $prev.longitude }   else { fake("longitude").number() }
+
+let new_temp = $base_temp + null.apply("gauss_delta")
+let new_hum  = $base_hum  + null.apply("gauss_delta")
+let new_lat  = $base_lat  + (null.apply("gauss_delta") / 100)   # smaller step for coordinates
+let new_lon  = $base_lon  + (null.apply("gauss_delta") / 100)
+
+root.device_id    = $device_id
+root.timestamp_ms = timestamp_unix_milli()
+root.temperature  = ($new_temp * 100).round() / 100
+root.humidity     = ($new_hum * 100).round() / 100
+root.latitude     = ($new_lat * 1000000).round() / 1000000
+root.longitude    = ($new_lon * 1000000).round() / 1000000
+
+let save = cache_set(
+  resource: "weather_state",
+  key: $device_id,
+  value: {
+    "temperature": root.temperature,
+    "humidity": root.humidity,
+    "latitude": root.latitude,
+    "longitude": root.longitude
+  }.format_json(no_indent: true)
+)
+
+meta msg_type   = "weather_measurement"
+# Which schema deserializes this. The value is the whole topic, so the
+# consumer point-reads exactly this string and has nothing to guess.
+meta schema     = "schemas/iot/weather_measurement/v1"
+meta mqtt_topic = "iot/weather/measurement/" + $device_id

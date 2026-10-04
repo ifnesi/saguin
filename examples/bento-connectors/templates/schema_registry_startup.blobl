@@ -1,0 +1,31 @@
+# schema_registry_startup.blobl
+#
+# Fires exactly three times at boot (see input.generate.count), once per
+# message in schema/iot.proto, and publishes each definition to the
+# `schemas` channel - a `latest` channel, so the current text of each
+# schema is kept and handed to whoever subscribes next, however long after.
+#
+# **Derived from schema/iot.proto rather than written out again**, so the
+# text a consumer resolves is the file the generator itself serializes
+# with. A second copy would be a second thing to keep in step, and the
+# first reading published against a stale one would deserialize into
+# nonsense with nothing saying so.
+let idx = counter(min: 0, max: 2)
+
+let proto = file("./schema/iot.proto").string()
+
+# Each `message X { ... }` block. The messages here have no imports and use
+# only scalar fields, so a block plus the file's own two header lines is a
+# complete .proto that compiles on its own. A schema that imported another
+# type could not be cut up this way and would be published whole.
+let block = $proto.re_find_all("(?s)message [A-Za-z]+ \\{[^}]*\\}").index($idx)
+let name  = $block.re_find_all_submatch("message ([A-Za-z]+)").index(0).index(1)
+
+root = "syntax = \"proto3\";\npackage iot;\n\n" + $block + "\n"
+
+# The topic is the schema's name in the same form the readings use for
+# msg_type, so `schema` and `msg_type` name the same thing two ways.
+let snake = $name.re_replace_all("(.)([A-Z])", "${1}_${2}").lowercase()
+
+meta msg_type   = "schema"
+meta mqtt_topic = "schemas/iot/" + $snake + "/v1"

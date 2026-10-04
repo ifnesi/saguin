@@ -1,0 +1,35 @@
+name: Bug report
+description: Something behaves differently from what an RFC says it should.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        saguin has no implementation yet, so today's bugs are in the
+        documentation or the build. Runtime reports are welcome the moment
+        there is a runtime.
+
+        If the behaviour you expected is not stated in any RFC, please use
+        the **specification** template instead - the fix belongs in the RFC
+        first.
+  - type: textarea
+    id: expected
+    attributes:
+      label: What should happen, and where it says so
+      description: Name the RFC section or the invariant if you can.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happens instead
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Commands, config, or a failing test. Smallest version that still shows it. MQTT client and version, if one is involved.
+      render: shell
+    validations:
+      required: true

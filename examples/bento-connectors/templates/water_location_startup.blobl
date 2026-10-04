@@ -1,0 +1,18 @@
+# water_location_startup.blobl
+#
+# Fires exactly 100 times (see input.generate.count in IoTDataGen.yaml), once per
+# stationary water-quality device, then this input closes and never fires
+# again for the lifetime of the process.
+let idx       = counter(min: 0, max: 99)
+let device_id = "wq-%03d".format($idx + 1)
+
+root.device_id    = $device_id
+root.timestamp_ms = timestamp_unix_milli()
+root.latitude     = fake("latitude").number()
+root.longitude    = fake("longitude").number()
+
+meta msg_type   = "water_location"
+# Which schema deserializes this. The value is the whole topic, so the
+# consumer point-reads exactly this string and has nothing to guess.
+meta schema     = "schemas/iot/water_location/v1"
+meta mqtt_topic = "iot/water/location/" + $device_id

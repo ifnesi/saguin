@@ -1,0 +1,60 @@
+# Compiled binaries and packaging output
+/saguin
+/saguind
+/bin/
+/dist/
+*.test
+*.exe
+
+# Coverage and profile output
+coverage.out
+coverage.html
+*.prof
+*.pprof
+
+# Vendored source
+vendor/
+
+# Local runtime state. The SQLite database and the memory provider's
+# snapshot both contain message payloads in the clear.
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+*.snapshot
+*.sock
+
+# Secrets and logs
+.env
+.env.*
+*.log
+*.pid
+
+# Python virtual environment for examples/demo.py, which is created by
+# hand rather than by the demo: a script that installs packages is a
+# script somebody has to read before running, and the point of the demo
+# is that it can be run.
+.venv/
+*.pyc
+
+# Editor and OS noise
+.DS_Store
+*.swp
+.vscode
+.audits
+
+__pycache__/
+
+# Assistant working files stay on the developer's machine. Only the
+# saguin-ask skill, which answers questions from these documents, ships.
+/CLAUDE.md
+/.claude/*
+!/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/saguin-ask/
+/.agents/*
+!/.agents/skills/
+/.agents/skills/*
+!/.agents/skills/saguin-ask/

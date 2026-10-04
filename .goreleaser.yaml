@@ -1,0 +1,91 @@
+# Release build for Sagüin. `goreleaser release --snapshot --clean
+# --skip=publish` builds everything below locally and publishes nothing;
+# CONTRIBUTING.md "Cutting a release" has the real steps.
+version: 2
+
+project_name: saguin
+
+builds:
+  - id: saguin
+    main: ./cmd/saguin
+    binary: saguin
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    # No -X for the version: it is a constant in cmd/saguin/main.go (the
+    # one place `saguin --version` reads), so it cannot be set at link
+    # time. The release workflow refuses a tag that disagrees with it.
+    ldflags:
+      - -s
+      - -w
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - "7"
+    ignore:
+      - goos: darwin
+        goarch: arm
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: release
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_
+      {{- if eq .Os "darwin" }}Darwin{{ else }}Linux{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "arm" }}armv{{ .Arm }}
+      {{- else }}{{ .Arch }}{{ end }}
+    files:
+      - LICENSE
+      - README.md
+      # The licence texts the binary carries and `saguin --licenses` prints.
+      - src: cmd/saguin/THIRD-PARTY-NOTICES.md
+        dst: THIRD-PARTY-NOTICES.md
+      - src: internal/mqtt/LICENSE.md
+        dst: LICENSE-mqtt-engine.md
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+dockers_v2:
+  - id: saguin
+    ids:
+      - saguin
+    dockerfile: Dockerfile
+    images:
+      - ghcr.io/ifnesi/saguin
+    tags:
+      - "{{ .Version }}"
+      # No "latest" for a pre-release: the empty tag is dropped.
+      - '{{ if not .Prerelease }}latest{{ end }}'
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.created: "{{ .Date }}"
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.source: https://github.com/ifnesi/saguin
+      org.opencontainers.image.licenses: Apache-2.0
+
+# The release notes are the CHANGELOG.md section for the tag, which the
+# workflow extracts; goreleaser's own commit list is not used.
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: ifnesi
+    name: saguin
+  # A hyphen in the version (a -dev or -rc tag) is a pre-release.
+  prerelease: auto

@@ -1,0 +1,1258 @@
+# Every key saguin accepts, with its default.
+#
+# Unknown keys are a hard error: a typo is a defect, and a configuration
+# the broker half-understands is worse than one it refuses.
+#
+# This is also the file `make demo` runs against, so some values below
+# are set for the demonstration rather than left at their default. Each
+# one says so.
+
+broker:
+  # Identifies this broker in its own logs. No default; there is nothing
+  # sensible to invent, and an unnamed broker is unhelpful the first time
+  # two of them appear in the same log.
+  id: demo
+
+  # How much the broker says: debug, info, warn or error. Absent is info.
+  #
+  # Worth knowing before you need it: several lines that only matter when
+  # something is wrong are written at debug on purpose, because they would
+  # otherwise repeat for as long as the fault lasts - a bridge's failed
+  # connection attempts are the clearest case. If a link is misbehaving and
+  # the log says nothing, this is the key.
+  log_level: info
+
+  # **`SIGUSR1` re-reads this key, the ws listener's same_origin and
+  # allowed_origins, every TLS listener's certificate and client CA, and
+  # the credential files** - the client password_file, the acl_file and
+  # the operators' file, each at the path it was started with. All of it
+  # is on one signal for one reason: a restart of a broker holding
+  # durable sessions costs every connection and every in-flight record,
+  # and neither getting `debug` out of a misbehaving bridge nor
+  # withdrawing one device's password is worth that.
+  #
+  # The signal logs what it applied and says out loud that addresses and
+  # storage are startup-only, so an edit to another key is never mistaken
+  # for one that took effect. An invalid file changes nothing
+  # and does not stop the broker: you may be mid-edit - and that goes for the
+  # credential files too, where nothing is applied unless every one of them
+  # loaded.
+  #
+  # `SIGHUP` is caught and does nothing but say so, at warn. saguin has no
+  # configuration reload - but unhandled, HUP would terminate the broker
+  # with no shutdown and no snapshot.
+
+  # Where the running process writes its own id. Absent means nowhere, which
+  # is what systemd, Docker and runit all want - each tracks the process
+  # itself. It is here because a reference that ships a key commented out
+  # ships a key nobody has run: this path is under the same /tmp/saguin-demo
+  # as the certificates and the database, and a real deployment writes
+  # /run/saguin/saguin.pid instead.
+  #
+  # `kill -USR1 $(cat /tmp/saguin-demo/saguin.pid)` re-reads log_level above
+  # and the credential files, which is what the file is for - and it is how
+  # an operator withdraws a device's access without a restart.
+  #
+  # **Absolute, and there is no `log_file` beside it.** A pid file holds one
+  # number and is replaced; a log file accumulates, and invariant 13 says
+  # everything that accumulates is bounded - which for a log means a size, a
+  # retention count, compression and deletion, or logrotate reimplemented
+  # inside a broker. saguin writes to standard output and lets the init
+  # system bound it. RFC 0005 has the table of what bounds it where; under
+  # Docker the answer is `max-size` on the logging driver, and it is not
+  # bounded by default.
+  #
+  # If it cannot be written the broker exits rather than running unmanaged:
+  # an operator who asked for one has something that reads it.
+  #
+  pid_file: /tmp/saguin-demo/saguin.pid
+
+  mqtt:
+    listen:
+      # Three doors, and this file opens all three, because they are not
+      # variations on one thing: a fleet arrives over TLS, a browser can
+      # only arrive over WebSocket, and a tool on the same box should not
+      # need a port at all. A broker takes one of each - tcp, ws, unix -
+      # and each is a block of its own, so a setting belonging to one
+      # cannot be written beside another. A block with no address is a
+      # mistake rather than a default, and is refused.
+      #
+      # password_file and allow_anonymous may be written on any listener
+      # here, where they win over the broker-wide pair below. One broker,
+      # two answers: the socket's file permissions guard the socket, and
+      # the fleet on the TCP port authenticates. A listener naming its own
+      # password_file admits its own users and nobody else unless it also
+      # writes allow_anonymous.
+      #
+      # **The credentials this file names are checked in, and readable.**
+      # The certificates are examples/support/certs, the password file is
+      # examples/clients.passwd, the acl_file is examples/acl.yaml -
+      # examples/README.md says what each one is and gives the openssl
+      # commands that produced the certificates. Nothing is generated.
+      #
+      # examples/demo.py COPIES them to /tmp/saguin-demo before starting the
+      # broker, and copies rather than reading them where they live because
+      # saguin refuses a relative path for cert_file, key_file,
+      # client_ca_file, password_file and acl_file: which certificate a
+      # listener serves must not depend on the directory the broker was
+      # started from. No absolute path into a repository is true on two
+      # machines, so a configuration that ships in one cannot name them
+      # where they sit. A real deployment has none of this problem - the
+      # files are at /etc/saguin, an operator put them there, and nothing
+      # else about this block changes.
+
+      # Where the broker accepts TCP connections. Defaults to :1883 - but
+      # only when no listener at all is configured, so a socket-only
+      # broker never silently also opens the port its author was avoiding.
+      # 8883 is the usual port for MQTT over TLS.
+      #
+      # **A kind with one door is this single mapping**, named after its kind.
+      # Two or more doors of a kind are a LIST instead, each with its own
+      # `name`: what a log line's listener=, a certificate error and
+      # `/v1/operations/users` know it by. This file shows both forms at once:
+      # one entry named `fleet`, the demo's own TLS port, and a second,
+      # `local`, for a plain port beside it (RFC 0002 "Several listeners of a
+      # kind"). A single-door file would write tcp: {address: ..., tls: {...}}
+      # directly, with no list and no name.
+      tcp:
+        - name: fleet
+          address: 127.0.0.1:8883
+
+          # TLS on a listener: the certificate this broker presents and its
+          # key, both absolute. Nothing is generated and nothing is
+          # defaulted - a certificate saguin made for itself would be
+          # encryption no client can verify, so every client would be told
+          # to skip the check, which looks secured and is not.
+          #
+          # Read at startup: a missing file or a key that does not match its
+          # certificate stops the broker naming the listener, rather than
+          # letting it come up in plain text. TLS 1.2 is the floor.
+          #
+          # cert_file holds the CHAIN, not only the leaf - there is no
+          # separate CA key because none is needed. A certificate issued by
+          # an intermediate is `cat leaf.pem intermediate.pem > cert.pem`.
+          # Send only the leaf and this broker still starts, while every
+          # client that verifies properly reports "unable to verify the
+          # first certificate".
+          tls:
+            cert_file: /tmp/saguin-demo/tls/broker.pem
+            key_file: /tmp/saguin-demo/tls/broker-key.pem
+
+            # The lowest version accepted: "1.2" (the default) or "1.3".
+            # A floor, not a pin: every version from it upward is accepted,
+            # so a client speaking something newer still connects.
+            min_version: "1.2"
+
+            # Mutual TLS: the authority that signs your CLIENTS'
+            # certificates (Mosquitto calls this cafile). Absent, no client
+            # certificate is asked for or looked at.
+            #
+            # The certificate's name - its Common Name, or its first DNS
+            # name where it has none - becomes the client's user name, and
+            # such a client is not looked up in the password file - the
+            # authority has already said who it is. That is what lets an
+            # acl_file rule about %u name a device that has no password.
+            client_ca_file: /tmp/saguin-demo/tls/ca.pem
+
+            # Whether every client must present one. Absent means yes,
+            # which is the only reading of a configured authority that is
+            # not a hole. false is the mixed mode a fleet migrating in
+            # batches needs: with a certificate you are named by it,
+            # without one you fall through to the password file.
+            #
+            # false here on purpose, and it is the reason one listener can
+            # show both halves of authentication: the demo connects to
+            # this port once with a certificate and no password, and once
+            # with a password and no certificate.
+            require_certificate: false
+
+        # A second door of the same kind: a plain port for a tool on this
+        # box that has no business carrying TLS. Not driven by
+        # the demo itself; shown so a reader comparing this file against a
+        # two-door deployment sees the real shape rather than an isolated
+        # snippet.
+        #
+        # Its own password_file rather than allow_anonymous: an acl_file
+        # is a statement about an identity, and this broker has one, so an
+        # anonymous door beside it is refused at startup exactly as the
+        # unix socket's comment above says. A listener naming its own
+        # password_file admits those users and nobody else.
+        - name: local
+          address: 127.0.0.1:1884
+          password_file: /tmp/saguin-demo/clients.passwd
+
+      # MQTT over WebSocket, which is the only way a browser reaches the
+      # broker at all - it cannot open a TCP socket. Same broker and the
+      # same rules; only the framing differs. 8083 is the usual port.
+      #
+      # With tls: below it is wss rather than ws, which is what a page
+      # served over https must have - a browser refuses a plain WebSocket
+      # from a secure page. The same certificate as the TCP listener: one
+      # broker, one name, one certificate.
+      ws:
+        address: 127.0.0.1:8083
+        tls:
+          cert_file: /tmp/saguin-demo/tls/broker.pem
+          key_file: /tmp/saguin-demo/tls/broker-key.pem
+        # Which web pages a browser may connect from, decided as the NATS
+        # server's settings of the same names decide it; a page that fails is
+        # refused before the upgrade. Clients that are not browsers send no
+        # Origin and are not affected.
+        #
+        # same_origin: the page's scheme, host and port must be this
+        # listener's own. On by default. Behind a proxy that terminates TLS
+        # the page is https and this listener is not, so every page is
+        # refused: set it false and list the pages.
+        #
+        # allowed_origins: the page's origin must be one of these, each
+        # scheme://host or scheme://host:port with no path and no wildcards.
+        # With same_origin on as well a page must pass both, so a dashboard
+        # on another site is listed with same_origin: false. Empty checks
+        # nothing.
+        #
+        # Both are re-read on SIGUSR1.
+        same_origin: true
+        allowed_origins: []
+
+      # A Unix socket, instead of TCP or as well as it. The one that
+      # matters on an edge box where the broker and its consumers share a
+      # machine: no TCP stack, no port to firewall, and the file's
+      # permissions become the access control.
+      #
+      # mode is those permissions, in octal and quoted so YAML does not
+      # read it as a number. Default "0660": owner and group, nobody else.
+      #
+      # saguin keeps a lock file beside the socket, path + ".lock", for as
+      # long as it runs. A socket left behind by a broker that crashed or lost
+      # power is replaced on the next start, with nobody needing to remove it;
+      # a socket another saguin is still serving is refused rather than taken
+      # over; and anything at the path that is not a socket is refused and
+      # left alone.
+      unix:
+        path: /tmp/saguin-demo/saguin.sock
+        mode: "0660"
+
+        # Who may connect on THIS listener would override broker.mqtt
+        # below, and this is the door the key exists for: the file's
+        # permissions already decide who may reach it, so a tool on this
+        # box need not also carry the password the fleet on the TCP port
+        # must.
+        #
+        #     allow_anonymous: true
+        #
+        # It is NOT written here, and the reason is worth knowing before
+        # you write it yourself: an acl_file is a statement about an
+        # identity, and an anonymous client has none. saguin refuses the
+        # pair at startup - with an acl_file set, every listener on the
+        # broker authenticates. Take the acl_file away and this line is
+        # the right answer again.
+        #
+        # Or its own users instead - a different file from the fleet's.
+        # A listener naming its own password_file admits those users and
+        # NOBODY else, unless it also writes allow_anonymous: it does not
+        # inherit the broker's answer to that question.
+        # password_file: /etc/saguin/local-tools.passwd
+
+        # Read a PROXY protocol v2 header from every connection: the
+        # client's real address, and the certificate Common Name where the
+        # proxy verified one. Without it a fleet behind one proxy is a
+        # single local peer in every log line and every connection count.
+        #
+        # This key exists on a Unix socket and nowhere else. The header is
+        # the peer asserting who its client is, so on a TCP listener
+        # anything that could connect could claim to be anybody; a
+        # socket's file permissions already decide who may assert it.
+        #
+        # With it set, a connection arriving without a header is refused -
+        # this socket exists because a proxy is in front of it, which is
+        # why the demo leaves it off: there is no proxy in front of this
+        # one.
+        #
+        # v2 and not v1: v1 carries addresses and no TLVs, so it cannot
+        # say which certificate was verified. In NGINX that is
+        # `proxy_protocol v2` (1.31.4 or later, which also sends the CN);
+        # in HAProxy `send-proxy-v2-ssl-cn`.
+        # proxy_protocol: true
+
+    # Who may connect, in Mosquitto's format - the same file, hash for hash,
+    # so a fleet moving from Mosquitto keeps the credentials it has.
+    # `saguin --passwd add <file> <user>` writes one. This is NOT the
+    # operations file below: an operator is not a device.
+    #
+    # Absent, it would mean there is nothing to authenticate against and
+    # every client is admitted. The startup line says which of the two
+    # this broker is running. Written, as it is here, only the clients in
+    # the file get in - this is a copy of examples/clients.passwd, which
+    # holds one user, and the demo shows a wrong password answered 0x86
+    # before it shows a right one accepted.
+    password_file: /tmp/saguin-demo/clients.passwd
+
+    # What each client may do once it is in: roles carrying rules, and
+    # clients given roles by pattern. RFC 0002 "What a client may do" has
+    # the shape; `saguin --acl <config> <user-name>` prints what a given
+    # user came to - the name a client authenticates as, never its
+    # client id, which no rule reads.
+    #
+    # Absent, it would mean every authenticated client may do anything, and
+    # `--acl` says exactly that rather than printing rows. It requires
+    # something that names a client - a password_file, or a listener with a
+    # client_ca_file, where the certificate's name is the identity -
+    # because authorization is a statement about an identity, and it
+    # refuses allow_anonymous: true beside it, on this broker or on any
+    # single listener, which is why the Unix socket above authenticates too.
+    #
+    # This is a copy of examples/acl.yaml, which is where to read the rules
+    # themselves: four roles, and clients given them by pattern.
+    acl_file: /tmp/saguin-demo/acl.yaml
+
+    # Whether a client that offers no user name is admitted. Unwritten, it
+    # follows the line above: no password file admits everybody, a password
+    # file admits only the clients in it.
+    #
+    # Written, it wins either way. `true` beside a password file is the
+    # mixed mode a fleet migrating one batch at a time needs - named clients
+    # authenticate, the rest are still let in. `false` with no password file
+    # is a startup error, because nothing could connect.
+    # allow_anonymous: false
+
+    # The oldest MQTT version admitted: "3.1.1" - the default - or "5",
+    # quoted or not. Broker-wide rather than per listener, because the
+    # version a device speaks is a property of the device rather than of
+    # the door it arrives at (RFC 0002 "Which versions may connect").
+    #
+    # Written at its default because admission is a decision an operator
+    # makes, not a side effect of upgrading: unwritten, a release that
+    # lowered the gate would start admitting devices the release before it
+    # turned away, with nothing in this file recording that anybody chose
+    # it. MQTT 3.1 is refused whichever is written - its SUBACK has no
+    # failure code and its CONNACK no Session Present flag, so a
+    # subscription saguin must refuse could only be granted and a consumer
+    # whose position was lost could not be told.
+    min_protocol_version: "3.1.1"
+
+  # The one HTTP listener an operator reads (RFC 0005). No default: absent
+  # means no listener is opened, because a port nobody configured is a port
+  # nobody asked to have open.
+  #
+  #   GET /health   no credential. Would restarting this process help? 200
+  #                 while the broker is answering, 503 when it is wedged.
+  #                 It reports nothing about anything outside this process
+  #                 - a peer bridge being down is not a reason to
+  #                 restart this broker, and a probe that failed on it
+  #                 would get this one restarted for a fault a restart
+  #                 cannot fix.
+  #   GET /metrics  the closed metric catalogue, in Prometheus text format.
+  #   GET /v1/operations/…
+  #                 what the numbers cannot answer: the sessions connected,
+  #                 the resolved configuration, what a queue is holding, who
+  #                 may connect and what each of them may do. RFC 0005 lists
+  #                 the routes and which credential reaches which.
+  #
+  # **Anywhere but loopback needs a password_file.** /metrics serves channel
+  # names and volumes, the lowest stored consumer position on each, and the
+  # peer address of every bridge - so a broker that let you bind this to
+  # 0.0.0.0 with no credential would serve all of it to anyone who can route
+  # to the port. Binding it anywhere else without one is a startup
+  # error naming both, rather than a decision nobody recorded.
+  #
+  # **With no credential configured, this listener answers to an address and
+  # not to a name.** A browser sends the name it was loaded by, so a page on
+  # another site whose domain re-resolves to 127.0.0.1 reads a listener with
+  # no password through whoever has it open. Reach it by address there -
+  # `localhost` counts - or name the operators below, which lifts it. A
+  # socket is not checked, and neither is /health.
+  #
+  # The file is Mosquitto's format, made with `saguin --passwd add <file>
+  # <user>`, and it is NOT the file your MQTT clients are in: an operator is
+  # not a device, and one file would let anything that can publish read the
+  # shape of your fleet. /health is never authenticated.
+  # operations:
+  #   listen:
+  #     # tcp and unix are each the same list-or-map shape broker.mqtt.listen
+  #     # gives a kind (RFC 0002 "Several listeners of a kind"): one door,
+  #     # named after its kind, as below - or a list of named doors once
+  #     # there are two, such as a loopback probe beside a routable door
+  #     # for a monitoring system elsewhere, each keeping every rule here
+  #     # on its own:
+  #     #
+  #     #   tcp:
+  #     #     - name: local
+  #     #       address: 127.0.0.1:9090
+  #     #     - name: fleet
+  #     #       address: 0.0.0.0:9443
+  #     #       tls:
+  #     #         cert_file: /etc/saguin/tls/ops.pem
+  #     #         key_file: /etc/saguin/tls/ops-key.pem
+  #     #         client_ca_file: /etc/saguin/tls/operators-ca.pem
+  #     tcp:
+  #       address: 127.0.0.1:9090
+  #
+  #       # TLS, the same block an MQTT listener takes. Add
+  #       # client_ca_file and a client certificate is required - which
+  #       # authenticates the port, so the address above may then be a
+  #       # routable one with no password file at all. The certificate's
+  #       # Common Name, or its first DNS name where it has none, becomes
+  #       # the caller's name.
+  #       # tls:
+  #       #   cert_file: /etc/saguin/tls/ops.pem
+  #       #   key_file: /etc/saguin/tls/ops-key.pem
+  #       #   client_ca_file: /etc/saguin/tls/operators-ca.pem
+  #
+  #       # This door's own operators, instead of the password_file
+  #       # below. Written here it wins for the port alone - which is
+  #       # the point: a monitoring system's credential rotates with the
+  #       # estate's secrets, and the agent on the socket belongs to this
+  #       # machine. One file for both makes the two rotate together.
+  #       # password_file: /etc/saguin/operations-remote.passwd
+  #
+  #     # And/or a socket, which is the answer for a reader on this box: no
+  #     # port is opened at all and the file's permissions are the access
+  #     # control. Mode defaults to 0660, owner and group. It takes a lock
+  #     # file beside it, as the MQTT socket above does.
+  #     unix:
+  #       path: /run/saguin/operations.sock
+  #       mode: "0660"
+  #
+  #       # Set this when nginx forwards here from its stream module with
+  #       # `proxy_protocol v2`: the header carries the Common Name nginx
+  #       # verified, so saguin knows who is asking without a password.
+  #       # A connection arriving without the header is refused, and the
+  #       # log says so - `proxy_protocol on` sends v1, which carries no
+  #       # name, and v2 is what to ask for.
+  #       # proxy_protocol: true
+  #
+  #       # And this door's own, the same way. A socket with no file
+  #       # anywhere has no credential, which is the ordinary
+  #       # arrangement: the permissions above are the gate.
+  #       # password_file: /etc/saguin/operations-local.passwd
+  #
+  #   # Who may read what, in Mosquitto's format, for every door that
+  #   # does not name a file of its own. With this, the TCP address above
+  #   # may be a routable one; without it, loopback or the socket - or a
+  #   # required client certificate, which authenticates the port just as
+  #   # well. /health is never authenticated either way.
+  #   #
+  #   # There is no allow_anonymous beside it, here or on a listener, and
+  #   # one written is refused at startup: a door with a file makes every
+  #   # reader prove who it is, and a door with none has no credential -
+  #   # which is what confines the port to loopback.
+  #   #
+  #   # A caller named by a certificate or by a proxy but absent from this
+  #   # file reaches /metrics and nothing else. Give it an entry here, with
+  #   # `saguin --passwd scope`, to widen it.
+  #   password_file: /etc/saguin/operations.passwd
+  #
+  #   # The shortest interval at which the catalogue is recomputed. A
+  #   # scrape arriving sooner is answered from the previous one - answered,
+  #   # never refused, because every scraper in common use records a refused
+  #   # scrape as a failed one, which is a gap in the graph and usually an
+  #   # alert. What it buys is that the cost of being observed is bounded by
+  #   # saguin rather than by whoever configures the scraper, and by how
+  #   # many of them there are. Default 60s, and a smaller value is refused
+  #   # rather than quietly raised. That is what Prometheus defaults its own
+  #   # scrape interval to; set the two to agree, because a scraper running
+  #   # faster sees the same numbers repeated and then jump, which makes a
+  #   # rate calculation look like a staircase.
+  #   min_scrape_interval: 60s
+
+  # Where channels keep their records. REQUIRED: at least one provider,
+  # and a default naming one of them, or the broker does not start. A
+  # memory provider with `snapshot_dir: none` keeps nothing across a
+  # restart, and the broker says so at startup.
+  storage:
+    # The provider a channel gets when it does not name one. Required.
+    default: local
+
+    # How long a channel keeps records, and how much of them, when it does
+    # not state its own. Both are REQUIRED, and both accept the word
+    # `none`, which means keep everything.
+    #
+    # There is no built-in figure, because both candidates are wrong. A
+    # built-in period would make a durable, replayable log quietly mean
+    # "the last few days of one", and a consumer that did not exist
+    # yesterday would find yesterday's events missing with nothing to say
+    # so. A built-in `none` would make every channel grow until the disk
+    # does not. So you write it once, here, and a channel that differs
+    # says so.
+    #
+    # `none` here because this file is a demonstration and nothing in it
+    # runs long enough to age out. A real deployment states a period.
+    #
+    # These REMOVE records, which is the difference from max_bytes below:
+    # retention deletes behind a producer and never says so, which is
+    # right for telemetry that ages out and wrong for anything an auditor
+    # will ask about. max_bytes says no and keeps everything.
+    #
+    # On a `latest` channel the period means something else and is worth
+    # knowing before a fleet meets it: it deletes the current VALUE of any
+    # topic that has gone quiet for longer than the period. A device
+    # reporting weekly loses its state under a three-day default. That is
+    # deliberate - a stale reading is worse than none - and such a channel
+    # states its own period.
+    default_retention_period: none
+    default_retention_bytes: none
+
+    providers:
+      # Two memory providers written in place, as one entry of the list...
+      - local:
+          # `memory` keeps records in memory and writes them out at
+          # shutdown. `sqlite` writes every record as it arrives, so the
+          # channel survives a crash and not only a graceful stop - see the
+          # commented provider below.
+          type: memory
+
+          # Where this provider's channels are written at shutdown, one
+          # file per channel plus a manifest. Must be absolute: a snapshot
+          # must not depend on where the broker was started from.
+          #
+          # There is NO DEFAULT, and `none` has to be written out. Both
+          # defaults are wrong: a default path invents a filename in your
+          # filesystem, and defaulting to none makes "durable channel,
+          # memory provider" quietly mean "discarded at shutdown".
+          #
+          # Memory durability is exactly the last successful snapshot: a
+          # channel here survives a graceful shutdown and does NOT survive
+          # a power cut.
+          snapshot_dir: /tmp/saguin-demo/snapshots
+
+        # A second provider for state not worth keeping. Same type, and it
+        # says in so many words that it keeps nothing: a channel here is
+        # gone at shutdown, cleanly and on purpose.
+        volatile:
+          type: memory
+          snapshot_dir: none
+
+          # The most this provider may hold across every channel on it. Past
+          # it a publish is refused with 0x97, and no channel's records are
+          # deleted to make room: the one thing that gives way is the
+          # broadcast log, where broker.session.storage is this provider
+          # (RFC 0002). It is one number for the provider rather than one per
+          # channel because what it protects is one pool - this machine's
+          # memory - and channels that share it do stop each other. An
+          # operator who needs them isolated configures two providers.
+          #
+          # A little of it is held back so the operations that FREE a full
+          # provider are never themselves refused - moving a failed job to the
+          # dead-letter channel, counting a delivery attempt, storing a
+          # consumer's position. Without that a queue can hold work it can
+          # neither deliver nor be rid of. The amount is one largest possible
+          # message plus its headers, worked out from broker.limits and not
+          # configured here; the broker states it at startup, so it is not
+          # something to arrive at with arithmetic. max_bytes must be at least
+          # twice it.
+          max_bytes: 16MiB
+
+      # ...and one named by `!include`: the same provider, in
+      # examples/support/storage/durable.yaml, where the team that owns
+      # that disk would review it. Channels below name `durable` and find it,
+      # because a provider is a name a channel refers to rather than a
+      # place in the document.
+      - !include support/storage/durable.yaml
+
+      # A provider no channel names is inert: nothing is created for it
+      # and no lock is taken, and the broker says so once at startup.
+      # That is what lets you declare where a channel is going before you
+      # move it there - see "Moving a channel between providers" in
+      # RFC 0004, which is also where the two migration commands are.
+      # - spare:
+      #     type: sqlite
+      #     file_path: /tmp/saguin-demo/spare.db
+      #
+      #     # How a sqlite provider commits. Absent - the default - the
+      #     # publishes arriving while a transaction commits are stored
+      #     # together in the next, and nothing waits for company. `none`
+      #     # is a transaction per publish. A duration makes a transaction
+      #     # wait up to that long for more publishes.
+      #     # publish_commit_max_records is REQUIRED beside it, has no
+      #     # default on purpose, and must not exceed
+      #     # limits.max_connections: saguin stores one record per
+      #     # connection at a time, so a larger batch can never fill and
+      #     # every commit would wait out the whole interval - slower than
+      #     # not collecting at all. RFC 0002 "How a sqlite provider
+      #     # commits" has the costs, measured.
+      #     publish_commit_interval: 2ms
+      #     publish_commit_max_records: 32
+      #
+      #     # How many read-only connections sit beside the one writer, so
+      #     # a consumer's read never queues behind a commit. Absent is 2,
+      #     # and up to 8. Each is a connection with a page cache of its
+      #     # own, so a small box - a Pi, a router - sets 1, or 0 to put
+      #     # every read back on the write connection. RFC 0002 "How a
+      #     # sqlite provider reads" has what it buys and what it costs.
+      #     read_connections: 2
+      #
+      #     # How often the write-ahead log is forced to disk. A power cut
+      #     # can lose the acknowledged publishes committed in about the
+      #     # last interval plus one fsync, never a hole and never the
+      #     # file. Absent is 150ms; 10ms to 1s. Each fsync with new
+      #     # data writes a block, so a consumer SD card may want a
+      #     # longer one. Nothing is written while idle. RFC 0004 "WAL,
+      #     # and synchronous=NORMAL".
+      #     flush_interval: 150ms
+
+  # Where a retained message on a BROADCAST topic is kept - one that a
+  # client published with the RETAIN flag to a topic no channel claims.
+  #
+  # The store always exists. Absent, as it is here, it is on
+  # broker.storage.default and keeps a value until it is replaced or
+  # deleted; the block only changes that. It is bounded by its provider's
+  # max_bytes, so clients cannot grow it past what you wrote. To refuse
+  # retained values to a client or a role, deny `retained` in the acl_file
+  # (examples/acl.yaml); there is no broker-wide switch.
+  #
+  # It is one store, not a channel: it claims no prefix, has no name, and
+  # holds only topics no channel claims. Uncomment to change its defaults.
+  #
+  # storage           which provider holds it. Defaults to
+  #                   broker.storage.default. Memory keeps them across a
+  #                   graceful shutdown, sqlite across a crash - the same
+  #                   promise that provider makes to every channel on it.
+  # retention_period  deletes the current value of any topic that has gone
+  #                   quiet for longer than this. Defaults to `none`, and
+  #                   that default is the careful one: any figure loses the
+  #                   state of a device reporting less often than it, and
+  #                   the dashboard then shows nothing with no error
+  #                   anywhere. A publisher's own Message Expiry Interval
+  #                   is honoured whatever this says.
+  #
+  # There is no max_bytes and no retention_bytes here: what grows is the
+  # number of topics rather than a history, so the PROVIDER's max_bytes is
+  # the bound, and past it a retained publish is refused with 0x97 rather
+  # than an older value being deleted to make room.
+  #
+  # A topic that a `latest` channel later claims is moved into that channel
+  # at startup, and the broker says how many moved. For an append channel
+  # or a queue the values are discarded instead, counted and named in the
+  # log, because a current value is not an event and is not work.
+  #
+  # retained:
+  #   storage: local
+  #   retention_period: none
+
+  # Where an EXACTLY-ONCE publish waits between the two packets that finish
+  # it. QoS 2 is a four-packet exchange: the client sends the message, the
+  # broker sends a receipt, the client sends a release, the broker sends a
+  # completion. saguin holds the message from the receipt to the release
+  # and only then writes it - to its channel, or to the broadcast log -
+  # which is what stops a repeat or a restart mid-exchange leaving the
+  # record stored twice.
+  #
+  # **QoS 2 is always offered, and every key inside the block has a
+  # default.** Absent, as it is here, the broker says Maximum QoS 2 and
+  # uses the defaults below; the block only changes them. There is no
+  # `qos2: false`: to refuse QoS 2 to a client or a role, deny `qos2` in the
+  # acl_file.
+  #
+  # MQTT hands ownership of the message to the broker at the receipt, a
+  # full round trip before the client is told the exchange is done, so a
+  # broker offering QoS 2 is holding messages nobody has finished sending.
+  # Each waits in the store of the channel it is for - a broadcast in the
+  # broadcast log's - inside that store's provider's max_bytes and inside
+  # max_inflight_per_client, and its release is one write in that store.
+  #
+  # max_inflight_per_client how many exactly-once publishes one client may
+  #                         have unreleased at once. Defaults to 20.
+  #                         Past it the next one is refused on its receipt
+  #                         with 0x97 (Quota exceeded), before the broker
+  #                         takes ownership of it, and the connection is
+  #                         left alone - the client's next exchange succeeds
+  #                         as soon as one of its own completes. It is per
+  #                         client so that one publisher leaving exchanges
+  #                         unfinished stalls itself and nobody else.
+  # expires_after           drops a publish that has waited this long for
+  #                         its release. Defaults to 5m. A connected client
+  #                         releases within a round trip, so what this
+  #                         covers is one whose link dropped after the
+  #                         receipt and which comes back to the same session
+  #                         to finish. Without it such a message would sit
+  #                         until the session ended, which
+  #                         limits.max_session_expiry puts at 30 days.
+  #
+  # There is no max_bytes here: the PROVIDER's max_bytes - the channel's,
+  # or the broadcast log's - is the bound, and what bounds one client is
+  # max_inflight_per_client.
+  #
+  # qos2:
+  #   max_inflight_per_client: 20
+  #   expires_after: 5m
+
+  # How long a connected session's acknowledgements may wait to be stored -
+  # a channel consumer's position and a broadcast session's alike: what an
+  # unclean stop sends again to a session that had acknowledged it.
+  # Absent is 200ms; a duration from 10ms to 1s. A clean DISCONNECT and a
+  # stop store them whatever this says. `storage` names the provider that
+  # keeps every session's state, and defaults to storage.default.
+  #
+  # session:
+  #   storage: local
+  #   ack_commit_interval: 200ms
+
+  # Where a shared group's backlog waits: the deliveries that matched a
+  # `$share/` group while none of its members was connected to take them.
+  # They are held, and served to the first member back in the order they
+  # arrived, so a fleet behind a flaky link does not lose the work it was
+  # assigned while it was away. They stay in the broadcast log, in the
+  # provider broker.session.storage names, so a backlog keeps across a
+  # restart what the sessions keep.
+  #
+  # **A group holds nothing unless one of its members has a session that
+  # outlives its connection**, whatever is written here: a group whose
+  # members are all clean-start has nobody the broker has promised anything
+  # to, and its deliveries are dropped and counted as no_shared_member.
+  # Only QoS 1 and 2 are held - a QoS 0 delivery is owed to nobody by
+  # anything. A group over an `append` or `latest` channel holds exactly as
+  # one over a broadcast topic does: the channel's record is copied into the
+  # same log for it.
+  #
+  # expires_after  drops a backlogged delivery that has waited this long,
+  #                whatever its members' sessions say. Absent, as it is
+  #                here, a backlog lives exactly as long as a member session
+  #                that could collect it, which is the careful default: the
+  #                alternative is a broker quietly discarding work nobody
+  #                asked it to bound. What goes this way is counted as
+  #                cause="expired", which is the knob it names - never as a
+  #                queue that filled up.
+  #
+  # What one group's backlog may cost is limits.session_queue_bytes below;
+  # when it is reached the oldest goes.
+  #
+  # share:
+  #   expires_after: 1h
+
+  # What a client is allowed to send. Every one of these is checked
+  # against an untrusted client, and every one has a real reason to be
+  # lowered on constrained hardware. Sizes take a binary suffix - KiB,
+  # MiB, GiB - or a plain byte count.
+  limits:
+    # Largest packet the broker will accept. Advertised in CONNACK, so a
+    # conforming client never sends a larger one, and checked against the
+    # packet's declared length before its body is read, so an oversized
+    # publish costs no memory. A client that sends one anyway has its
+    # connection closed with nothing on it - the bound is enforced before
+    # anything exists that could answer.
+    max_message_size: 1MiB
+
+    # Longest topic name a publish may carry. Over it, the publish is
+    # refused with 0x90 (Topic Name invalid).
+    max_topic_length: 1024
+
+    # Longest client id a CONNECT may carry. Over it the connection is
+    # refused with 0x85 (Client identifier not valid), before a session
+    # exists. It is here rather than fixed because a client id is not only
+    # logged: a durable consumer's stored position is keyed by it, so it is
+    # written into the store and survives restarts, and an unbounded one is
+    # durable state whose size an anonymous client chooses. 256 is well
+    # above the device identifiers deployments use and far below the 65,535
+    # the wire allows. MQTT requires any id of 1 to 23 bytes to be accepted,
+    # so a value below 23 is refused at startup.
+    max_client_id_length: 256
+
+    # Most User Properties one publish may carry, and their total size in
+    # keys plus values. Over either, the publish is refused with 0x97
+    # (Quota exceeded).
+    max_header_count: 32
+    max_header_bytes: 8KiB
+
+    # Most connections held at once. Beyond it, a new client is refused
+    # rather than accepted and starved: with 0x89 (Server busy) where its
+    # socket got a place to wait and sent a CONNECT, otherwise (always on
+    # a ws door) the socket is closed with nothing written.
+    max_connections: 10000
+
+    # Most topic filters one client may hold. Each is about 2.3KB of memory
+    # no other bound counts. A SUBSCRIBE past it has each filter over the
+    # count refused 0x97 (Quota exceeded), and the connection stays up; a
+    # re-subscribe replaces a filter and adds nothing. 10000 because Home
+    # Assistant subscribes once per entity; an edge box whose devices each
+    # hold a few can set 100. RFC 0002 "How many topic filters one client
+    # may hold".
+    max_subscriptions: 10000
+
+    # The most levels a topic name or filter may have, anywhere one enters:
+    # a publish, a Will, a SUBSCRIBE, an UNSUBSCRIBE, and every filter in
+    # this file and the acl_file. Each level of a filter is a node the topic
+    # index holds, about 600 bytes, and nothing else bounds a filter's depth.
+    # RFC 0002 "How deep a topic may be".
+    max_topic_levels: 200
+
+    # The longest a client may ask its session - and so a durable consumer's
+    # stored position - to outlive its connection. A client asking for more
+    # is given this and told so in the CONNACK, which is the mechanism MQTT
+    # provides; one asking for less gets what it asked for.
+    #
+    # It is here because without it the ceiling is MQTT's own 0xFFFFFFFF,
+    # about 136 years, and a fleet whose devices take a fresh client id every
+    # boot then leaves one stored position per boot, per channel, that
+    # nothing ever removes.
+    #
+    # Lower it if your devices are never away for long and their ids churn;
+    # raise it if they are away for longer than a month and you want them to
+    # resume where they stopped rather than at the retention floor. `none` is
+    # not accepted: a session that never expires is what this bounds.
+    max_session_expiry: 30d
+
+    # How far one session may fall behind in what it is owed at QoS 1 and 2:
+    # waiting for room in the client's Receive Maximum, or, while it is away,
+    # behind its cursor in the broadcast log. Each message counts as its
+    # payload, topic and properties, and its entry beside them: about 960
+    # bytes for one in the client's in-flight table, 80 for one owed from the
+    # log and waiting, and both and 192 more for one owed from the log and on
+    # the wire. Past it the oldest the session is owed goes and is counted as
+    # session_queue_full; the publisher is never refused. Absent is 1MiB, or
+    # max_message_size where that is larger, and a smaller value than
+    # max_message_size is refused.
+    session_queue_bytes: 1MiB
+
+    # The longest a client may go quiet before the broker may close it,
+    # or `none` for no ceiling, which is the default.
+    #
+    # A client picks its own keepalive and may pick zero, which MQTT
+    # defines as "never disconnect me for being idle" - so a device that
+    # asks for zero, or for hours, holds a session the broker cannot tell
+    # is dead until max_session_expiry runs out. That is a much longer
+    # clock, and it is the one that decides when a durable consumer's
+    # stored position is released.
+    #
+    # Nothing is refused: a client asking for more is given this value in
+    # its CONNACK and must use it.
+    max_keepalive: none
+
+    # What ONE client may send in a second: messages, and bytes. Absent,
+    # as both are here, means no bound.
+    #
+    # **Every other bound in this block is a size, and a size does not
+    # bound a rate**: a client publishing as fast as it can is limited
+    # only by what it lands in - a channel at its max_bytes refuses with 0x97,
+    # which is backpressure and works - and a broadcast topic has no size
+    # bound at all. A device with a firmware bug looping on one is answered
+    # as fast as the broker can go, for as long as it likes.
+    #
+    # **There is no default because there is no figure to pick.** What a
+    # deployment sustains is its storage's rate, and memory and sqlite
+    # differ by an order of magnitude; a default drawn from either would
+    # throttle a legitimate fleet on the other. Write it from the row that
+    # matches your storage. A written `0` is refused at startup rather than
+    # read as "no bound": those mean opposite things, and one of them is a
+    # broker that refuses every publish.
+    #
+    # Over the rate is 0x97 (Quota exceeded) and the connection is left
+    # alone. Disconnecting would turn a burst into a reconnect storm, and it
+    # is not needed: the refusal happens before anything is stored, so a
+    # client that ignores the code accumulates nothing.
+    #
+    # **Both, because they bound different things.** A thousand one-byte
+    # publishes cost a kilobyte and a thousand topic lookups, permission
+    # checks and store writes; ten one-megabyte publishes cost ten
+    # operations and ten megabytes. Either alone leaves the other hole open.
+    # Whichever is reached first refuses; either may be written alone.
+    #
+    # These are the FLOOR every client takes - anonymous ones, clients no
+    # acl_file pattern names, and brokers with no acl_file at all. A client
+    # the acl_file names replaces them, up or down: see examples/acl.yaml,
+    # where the fleet and the gateway are given different numbers.
+    #
+    # A client that has been quiet may burst up to one second's worth and
+    # no more. A message larger than the whole byte budget is admitted and
+    # spends it into deficit, rather than being refused for ever - that
+    # would make this a ban on large messages, and max_message_size above
+    # is where a size ceiling belongs.
+    # publish_rate: 500
+    # publish_bytes: 512KiB
+
+    # The longest the broker will wait to hand a packet to a client before
+    # disconnecting it, or `none` for no ceiling. 5s is the default.
+    #
+    # **This one is not about the slow client, it is about everyone else.**
+    # A client can stop reading its socket with the connection still open -
+    # crashed, hung, or behind a firewall that quietly stopped forwarding.
+    # A channel delivery is written by a goroutine claimed for that one
+    # consumer and channel, and a publisher waits on storage and on
+    # nothing another client does - so a client that stops reading holds
+    # up its own stream, and this deadline is what ends even that.
+    #
+    # It governs every write to a client, by two routes: saguin writes
+    # append and latest deliveries, dead-letter records and every control
+    # reply, and the substrate writes a queue's offers and broadcast with
+    # the same deadline, armed inside the client lock it holds across the
+    # write. That second route is the one that bites hardest - unbounded,
+    # that write would hold the loop that offers every queue's records,
+    # expires jobs and runs both retention sweeps for every channel.
+    #
+    # A client that trips this is disconnected, because the deadline fires
+    # mid-packet and half a packet cannot be continued. It costs that client
+    # nothing: a durable consumer's position only advances on its own
+    # PUBACK, so it reconnects and resumes exactly where it was.
+    #
+    # Raise it for a genuinely slow link - a ship, a substation, a metered
+    # connection. A write only waits at all once the kernel's buffer is
+    # full, which means the far end has stopped reading rather than being
+    # slow, so 5s is already generous for a link that works.
+    write_timeout: 5s
+
+    # How long a new connection may stay open without sending CONNECT, in
+    # whole seconds. A connection is nobody's client until then and has no
+    # keepalive, so this is the only bound on a socket that opens and says
+    # nothing. It holds a max_connections slot from the moment it arrives,
+    # so this is also how long a silent socket holds one. `none` is not
+    # accepted.
+    connect_timeout: 10s
+
+    # The largest CONNECT accepted before its client has authenticated, fixed
+    # header included. A larger one is answered 0x95 (Packet too large) from
+    # its declared length, without its body being read; a 3.1.1 client is
+    # closed. 100KiB fits any CONNECT whose fields stay within MQTT's limits,
+    # including a 65,535-byte Will payload. It may not exceed
+    # max_message_size. On a box short of memory, lower max_connections first:
+    # much of what a handshake holds is fixed.
+    max_connect_size: 100KiB
+
+    # Connections each MQTT listener accepts a second, bursting to twice that,
+    # or `none`. A connection over the rate waits in the accept queue rather
+    # than being refused, so a fleet reconnecting after an outage is slowed,
+    # not turned away: at 500 a second, 10,000 devices are all back within
+    # about 20 seconds. It bounds the password checks strangers can make the
+    # broker run; lower it on a small processor.
+    max_connect_rate: 500
+
+channels:
+  # A channel claims the topics its `filter` matches - an ordinary MQTT
+  # topic filter. A topic no filter matches is ordinary MQTT broadcast:
+  # there is no `type: broadcast`, because configuring that would only be
+  # a way to get it wrong.
+  #
+  #   channels:
+  #     water-location:
+  #       type: latest
+  #       filter: iot/water/+/location/#
+  #     water-measurement:
+  #       type: append
+  #       filter: iot/water/+/+/#
+  #
+  # Filters overlap on purpose - `iot/water/w-7/location` matches both of
+  # those - and **the one that spells the topic out most exactly holds
+  # it**: a spelled-out level beats `+`, `+` beats `#`, and the first level
+  # at which two filters differ decides. So the location is current state
+  # and `iot/water/w-7/flow` is an append record, out of two lines that
+  # deliberately cross. The order of this file has no effect on any of it.
+  #
+  # A level may be written as `{a,b}`, expanded at startup, so a channel
+  # wanting two spellings of one level is still one `filter:` line.
+  #
+  # **The four channels below divide one `iot/` hierarchy**, which is what
+  # a channel claiming a first topic level could not do at all: a domain
+  # holds telemetry, current state, presence and work at once, and
+  # whichever type that root was given, the other three got the wrong one.
+  #
+  #   iot/<site>/events/<thing>     the event log      append
+  #   iot/<site>/state/<thing>      current state      latest
+  #   iot/<site>/presence/<thing>   who is here        latest
+  #   iot/<site>/work/<thing>       work to be done    queue
+  #   iot/<site>/health/<thing>     anything else      BROADCAST
+  #
+  # That last row is the point as much as the others: a topic no filter
+  # matches is ordinary broadcast, delivered live and stored nowhere, and
+  # it sits *inside* the same tree as the four that are claimed.
+  #
+  # **None of these filters ends in `#`, so each matches four levels and no
+  # more.** `iot/depot/events/order-1/detail` is five levels and belongs to
+  # nobody, which is the line an operator writes by accident - so the demo
+  # publishes one and shows where it goes.
+  #
+  # A channel writing no filter claims `<name>/#`. `saguin --route <config>
+  # <topic-or-filter>` says where a topic lands and what a filter would be
+  # served, without publishing anything.
+  #
+  # A channel name holds letters, digits, and `-`, `_`, `.` - the set a
+  # Kafka topic holds - is at most 128 bytes, and is not `.` or `..`. It
+  # holds no `/` and is one topic level. **The name is identity and the
+  # filter is placement**: the name is what a snapshot file, a storage key,
+  # a metric label and the `$saguin/` control topics are built from, so a
+  # channel whose records sit four levels down still has one flat name to
+  # seek on. `__dlq` is reserved, because a queue derives that name for
+  # itself.
+
+  # The three channels below sit on the three providers on purpose, so
+  # that one broker shows what each kind of storage promises:
+  #
+  #   events    sqlite            survives a crash
+  #   state     memory + snapshot survives a graceful shutdown, not a crash
+  #   presence  memory, none      survives nothing, deliberately
+  #
+  # Stop this broker two ways - a signal it can shut down on, and a kill
+  # it cannot - and the three answer differently. Nothing about a
+  # channel's semantics changes with its provider: an append channel
+  # replays either way, and only how much of it is still there after a
+  # stop differs.
+
+  # `channels:` is written here as a list, so that channels can be split
+  # across files: an entry is either `!include <file>` or channels written
+  # in place, and the two mix freely. One file stops being the right shape
+  # well below the number of channels a fleet reaches, and a domain's
+  # channels belong in a file its own owners review.
+  #
+  # A path is relative to this file. An included file may not include
+  # another, and a channel name defined twice is a startup error naming
+  # both files. RFC 0002 "Channels split across files" has the rest.
+  #
+  # A configuration with few enough channels to keep in one file still
+  # writes `channels:` as a single mapping, and nothing here requires this
+  # shape.
+  - !include support/channels/presence.yaml
+
+  # A durable, replayable event stream. Every subscriber holds its own
+  # position; consumption removes nothing.
+  - events:
+      type: append
+      filter: iot/+/events/+
+
+      # Where a subscriber with NO stored position starts: `floor` - the
+      # default - is everything the channel holds, `tail` is records from
+      # now on. It governs only that first arrival: a session that kept a
+      # position resumes at it and is served everything it missed,
+      # whatever this says. Only an append channel has one.
+      #
+      # `floor` because this is an event log nobody may miss. A channel
+      # of readings - where a dashboard opening for the first time wants
+      # now rather than the week before - writes `tail`, and its history
+      # is still one seek away.
+      start: floor
+
+      # Which storage provider holds this channel. Defaults to
+      # broker.storage.default.
+      #
+      # Changing this word moves the channel and does NOT move its records:
+      # the channel starts again at offset 1 and what was there stays in the
+      # old provider, reachable only by changing the word back. RFC 0004
+      # has what that costs and the two commands that carry the records
+      # across instead.
+      storage: durable
+
+    # Durable latest-value-per-topic state. A publish replaces a topic's
+    # value; a zero-length payload deletes it. A subscriber is sent the
+    # current value of everything its filter reaches.
+    #
+    # Written in the same entry as `events`, because one entry is a group
+    # of channels rather than a single one.
+    state:
+      type: latest
+      filter: iot/+/state/+
+      storage: local
+
+      # How long a deletion is kept. A deleted topic is not shown to
+      # anybody - a subscriber is told nothing about it, and a point read
+      # answers empty, exactly as for a topic never set - but it is held so
+      # that a broker mirroring this channel over a bridge can be told the
+      # topic is gone. A day when this is not written; `none` keeps it as
+      # long as the channel exists. Set it to the longest outage such a
+      # mirror may have and still learn about a deletion.
+      deletion_retention_period: 1d
+
+  # Work exactly one worker should do. Consumed only through
+  # $saguin/queue/jobs, at QoS 1.
+  #
+  # On sqlite, so unresolved work survives a crash: a job handed out and
+  # not acknowledged is available again when the broker returns, with its
+  # attempt count intact. jobs__dlq inherits this provider, which is what
+  # lets a record leave the queue and arrive in the dead-letter channel in
+  # one commit.
+  #
+  # jobs__dlq is derived automatically and must not be configured.
+  - jobs:
+      type: queue
+      filter: iot/+/work/+
+      storage: durable
+
+      # The most unresolved work this queue may hold. Past it a publish is
+      # refused with 0x97 (Quota exceeded) - nothing is ever deleted to make
+      # room, because dropping unacknowledged work is the one thing a queue
+      # must never do. Resolution is what frees the space, so this is
+      # backpressure rather than a limit: the queue accepts work again as its
+      # workers catch up, with nobody acting.
+      #
+      # Unset means no bound. A `latest` channel cannot have one at all.
+      max_bytes: 8MiB
+
+      # How long a worker holds a job before the broker takes it back and
+      # redelivers it. Default 30s; 5s here so the demonstration does not
+      # spend half a minute waiting for a timeout.
+      visibility_timeout: 5s
+
+      # Delivery attempts before the job is dead-lettered into jobs__dlq.
+      # Default 5; 3 here to keep the demonstration short.
+      retry:
+        max_attempts: 3
+
+        # How long a job waits after a worker reports failure before it is
+        # offered again, and what that gap is built from. Default `none`:
+        # a returned job is offered on the next 200ms tick.
+        #
+        # `linear` is base x attempt - 2s, 4s, 6s. `exponential` is
+        # base x 2^(attempt-1) - 2s, 4s, 8s, 16s. There is no maximum,
+        # because max_attempts above already bounds the total: at this base,
+        # three attempts come to 6s linear and 6s exponential.
+        #
+        # Write both keys or neither. A shape with no base has no gap to
+        # build and a base with no shape is read by nothing, so either alone
+        # is refused at startup rather than starting a broker that looks
+        # configured.
+        #
+        # **The gap is counted from when the worker last had the job, which
+        # is what decides the case worth knowing about.** A worker that says
+        # nothing and has its job taken back by visibility_timeout has
+        # already waited that long, so its gap is spent and the job goes out
+        # on the next tick. Only a job a worker handed back waits. Set a
+        # backoff longer than visibility_timeout and that stops being true -
+        # the difference is what a reclaimed job then waits.
+        backoff: linear
+        backoff_base: 2s
+
+      # How long work may sit unresolved before it expires. No default:
+      # unset means work never expires. Must be greater than
+      # visibility_timeout, or a job could expire while a worker still
+      # holds it and the worker's answer would arrive for a job that is
+      # gone.
+      #
+      # Checked in two places, and they are not redundant: as a job is
+      # handed to a worker, so none is ever given work already too old to
+      # do, and on the broker's own sweep, because a queue whose workers
+      # have all gone away is never asked for anything - and expiry is for
+      # work nobody is processing, which is exactly that queue.
+      #
+      # A job out with a worker is left alone by the sweep. It expires on
+      # its next offer instead, or when the worker hands it back.
+      # job_expires_after: 6h
+
+# Every key RFC 0002 specifies is accepted and enforced. The four
+# retention keys are not shown on the channels above only because this
+# file sets `none` broker-wide; each channel may state its own:
+#
+#   channels.*.retention_period    on an append or latest channel, and on
+#   channels.*.retention_bytes     a queue's dead-letter channel through
+#                                  the two keys below. Both REMOVE the
+#                                  oldest records to stay under, where
+#                                  max_bytes refuses the publish instead.
+#   dlq_retention_period           the same two for the dead-letter
+#   dlq_retention_bytes            channel a queue derives, spelled in the
+#                                  queue's block because its name is not
+#                                  yours to write
+#
+# Retention is applied by a sweep on the broker's clock rather than by the
+# publish that goes over, so a channel may hold a little more than it says
+# for a moment: over retention_bytes until the next sweep, and past
+# retention_period by about a tenth of it. That is the difference from
+# max_bytes, which refuses a producer and therefore holds exactly. Neither
+# interval is configurable and the broker states both at startup.
+
+# A bridge is saguin as a client of somebody else's broker. It subscribes
+# there and re-publishes what arrives through this broker's own publish
+# path, so a bridged record is resolved to a channel, held to the same
+# bounds and answered with the same reason codes as one from a local
+# client. There is no second way into a channel.
+#
+# It is commented out because `make demo` runs this file and there is no
+# peer to connect to - not because it is unimplemented. Point
+# `peer` at a real broker and uncomment to use it.
+#
+# bridges:
+#   head-office:
+#     peer: tls://mqtt.example.com:8883   # tcp, tls, ws or wss, with a port
+#     client_id: vessel-07                    # saguin's identity at the far end;
+#                                             # no default, and no two bridges may
+#                                             # share one at the same peer
+#
+#     # The authority signing the PEER's certificate, for a tls:// or
+#     # wss:// link whose certificate no public root vouches for - which is
+#     # what an estate running its own authority has. Absent, the system
+#     # roots are used. There is no way to turn verification off: a bridge
+#     # carries records out of here, and a link that accepts any certificate
+#     # accepts whichever machine answered first.
+#     ca_file: /etc/saguin/tls/peer-ca.pem
+#
+#     # The other half: the certificate saguin PRESENTS when the peer
+#     # asks for one, which is what saguin's own listener asks for with
+#     # `client_ca_file` set - so this is what two saguins need to bridge to
+#     # each other under the strongest setting either of them offers. Both
+#     # or neither, and a pair without a `ca_file` above is allowed: the
+#     # authority checks the far end, the pair identifies this one.
+#     cert_file: /etc/saguin/tls/bridge.pem
+#     key_file: /etc/saguin/tls/bridge-key.pem
+#     topics:
+#       # Rules are tried in order and the first match wins, so the order
+#       # here is significant. `filter` is what goes on the wire as
+#       # saguin's SUBSCRIBE, against the topic space at whichever end this
+#       # rule reads from. `topic` is the WHOLE topic the record takes at
+#       # the other end, with `$1`, `$2` … standing for the filter's `+`
+#       # levels in order and `$#` for its `#` tail.
+#       #
+#       # No rule names a channel. The topic decides where a record lands,
+#       # exactly as it does for anything else published into saguin, and
+#       # `--check-config` prints what each rule reaches so the expectation
+#       # is checked rather than written twice.
+#       - filter: fleet/+/telemetry/#
+#         topic: readings/telemetry/$1/$#
+#         # fleet/vessel-07/telemetry/hold/psi
+#         #   -> readings/telemetry/vessel-07/hold/psi
+#         direction: in
+#
+#       # `direction` is required, and there is no default: an omitted key
+#       # deciding whether this broker's records leave it is not something
+#       # you could see in the file. `in` subscribes at the peer and lands
+#       # what arrives here; `out` reads what this broker holds under the
+#       # filter and publishes it there; `both` does each, on one filter.
+#       #
+#       # `both` requires the identity mapping - no `topic:` - because a
+#       # template is a one-way rewrite with nothing to invert it, so a
+#       # `both` rule carrying one would mean two different rules under one
+#       # name. A topic no channel claims is broadcast, in either direction.
+#       - filter: alerts/#
+#         direction: both
+#
+# Three things to know before pointing one at a busy broker, all in
+# RFC 0002 "Bridges":
+#
+#   * saguin does not acknowledge the peer until its own store has
+#     taken the record. A channel at its max_bytes therefore becomes
+#     backpressure on the peer subscription - which is intended, and
+#     means a bridge into a channel nobody drains will stop draining a
+#     broker other people are using.
+#   * An inbound bridge is only as durable as the broker it reads from.
+#     saguin connects with a persistent session so the peer holds the
+#     backlog while the link is down, and that buffer is bounded by their
+#     rules, not saguin's. A peer that discards past its own queue limit
+#     does so without saguin being able to see that it happened.
+#   * A duplicate on the link is a second record at its own offset: the
+#     peer redelivers, saguin stores. From another saguin it carries the
+#     original's saguin-id, so a consumer can recognise it; from a foreign
+#     broker it carries no identity and cannot be told apart.
+#
+# Three keys tune the link, each optional and each shown with its default.
+# They are per bridge, beside `client_id` above, because what they describe
+# is the far end and no two peers are alike:
+#
+#     session_expiry: 1d
+#     receive_maximum: 20
+#     ack_interval: 5ms
+#
+#   session_expiry     how long the peer keeps saguin's session, and so
+#                      how long an outage it holds a backlog across. It
+#                      spends somebody else's storage, in a queue bounded by
+#                      their rules. Not `none`, which every other duration
+#                      here accepts: MQTT can say "never expires", and such
+#                      a session outlives the box it belonged to on another
+#                      operator's broker, where only they can clear it.
+#   receive_maximum    how many records the peer may have in flight to
+#                      saguin at once, between 1 and 65535. This is the
+#                      backpressure - saguin acknowledges only once its own
+#                      store has the record - and it bounds what a bridge
+#                      holds unacknowledged. 1 makes the link a round trip
+#                      per record; high makes a full channel take longer to
+#                      become backpressure.
+#   ack_interval       how long a record saguin has already stored may wait
+#                      before the peer is told, between 1ms and 1s. With
+#                      receive_maximum it sets a throughput ceiling of one
+#                      over the other, and it is the window in which a link
+#                      cut makes the peer redeliver - a separate record
+#                      here, carrying the original's saguin-id where the
+#                      peer is a saguin and a fresh one where it is not.
+#                      The one key in this file that takes a value below a
+#                      second.

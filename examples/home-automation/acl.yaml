@@ -1,0 +1,165 @@
+# What each client of the Zigbee hub may do.
+#
+# Rules go into a ROLE and clients are given roles by pattern. There are only
+# two principals here and it would be shorter to write the rules twice - but
+# the moment a second hub or a second dashboard appears, the copy is where the
+# mistake goes, so this file is shaped the way a real one would be.
+#
+# `docker compose exec saguin saguin --acl /etc/saguin/saguin.yaml
+# zigbee2mqtt-hub-1` prints what any one client comes to, with the
+# substitution already made. It runs in the container because the config
+# names the container's paths, and `--acl` loads the acl file from where the
+# config says it lives.
+
+roles:
+  # The bridge. It owns the device topics and the bridge topics: it is the
+  # only thing that should ever write them.
+  #
+  # No `seek` anywhere: zigbee2mqtt never replays a channel from a stored
+  # position, so granting it would be a verb nobody uses, and a verb nobody
+  # uses is one nobody notices being wrong.
+  zigbee-bridge:
+    - channel: devices
+      allow: [write, read]
+    - channel: bridge_state
+      allow: [write, read]
+    - channel: bridge_events
+      allow: [write, read]
+    - channel: bridge_log
+      allow: [write, read]
+
+    # Commands and their answers are ordinary broadcast - no channel claims
+    # them, so this is a topic rule rather than a channel one. The bridge
+    # READS the request topics and WRITES the responses.
+    #
+    # **It reads `zigbee2mqtt/#`, because that is the one filter zigbee2mqtt
+    # subscribes to** (2.14.1, `mqtt.js`: `${base_topic}/#`, confirmed on the
+    # wire), and a subscription is granted whole or refused `0x87`: a filter
+    # is granted only where every topic it matches is granted. The channels
+    # above cover the channel topics under it; this covers the broadcast ones
+    # (`+/set`, `bridge/request/#`, its own responses, and anything else under
+    # its base topic).
+    - topic: zigbee2mqtt/#
+      allow: [read]
+    - topic: zigbee2mqtt/bridge/response/#
+      allow: [write]
+
+  # The radio gateway. One-way: 433MHz sensors announce and are never
+  # addressed, so there is no command topic here and nothing for this role
+  # to read on the broadcast side.
+  rf-bridge:
+    - channel: rf_readings
+      allow: [write]
+    - channel: rf_gateway
+      allow: [write]
+
+    # rtl_433 publishes each reading a second time as one JSON document, and
+    # its own decoder statistics, on topics no channel claims. Those are
+    # ordinary broadcast: live to whoever is listening and stored nowhere.
+    #
+    # **Granting them is not optional even though nothing stores them.** A
+    # channel rule does not reach a broadcast topic, so without these two the
+    # gateway is refused `0x87` on every reading it decodes, once per
+    # transmission, for ever. It was, eighteen times in three minutes, and
+    # the only place that said so was the broker's log.
+    - topic: rtl433/events
+      allow: [write]
+    - topic: rtl433/states
+      allow: [write]
+
+  # A dashboard, a phone, the viewer: anything that looks at the house.
+  #
+  # It reads state and it sends commands, and it can never write a device
+  # topic - so a buggy dashboard cannot invent a temperature reading that
+  # every other client then believes. That separation is the reason this file
+  # exists rather than one role called `everything`.
+  home-viewer:
+    - channel: devices
+      allow: [read]
+    - channel: bridge_state
+      allow: [read]
+
+    # `seek` is what lets it replay the event log from a position of its own,
+    # which is how a dashboard that was closed all weekend catches up.
+    - channel: bridge_events
+      allow: [read, seek]
+
+    # Same again for the log: `seek` is what makes "show me last night"
+    # possible from a dashboard that was not running last night.
+    - channel: bridge_log
+      allow: [read, seek]
+
+    # The radio half, read-only for the same reason as the Zigbee half: a
+    # dashboard that could write a temperature could invent one.
+    - channel: rf_readings
+      allow: [read, seek]
+    - channel: rf_gateway
+      allow: [read]
+
+    # **Every broadcast topic, because the viewer subscribes to `#`** - its
+    # default, and the demo's point: the whole tree, including the topics no
+    # channel claims (`rtl433/events`, `rtl433/states`, the command and
+    # response topics). A filter is granted only where every topic it matches
+    # is granted, so the channel rules above are not enough: without this one
+    # the subscribe is refused `0x87`, the viewer stays connected and shows
+    # nothing.
+    #
+    # It also covers `viewer-reply/+`, the MQTT 5 response topics the viewer
+    # names for a point read, a seek or a sessions verb. Without a grant
+    # there the subscribe is refused `0x87` and every answer is lost -
+    # silently, because the page degrades to working without them. A viewer
+    # that subscribed to less than `#` would need that one granted by name.
+    - topic: "#"
+      allow: [read]
+
+    - topic: zigbee2mqtt/+/set
+      allow: [write]
+    - topic: zigbee2mqtt/bridge/request/#
+      allow: [write]
+
+users:
+  # The bridge, and only from the client id that IS the bridge.
+  #
+  # `client_ids: "%u"` says "connect under the name on your credential". It
+  # matters because the password alone would otherwise let anything that has
+  # it publish device state - and a hub's password ends up in a compose file,
+  # a backup, and somebody's notes. Bound this way, a copy of the password
+  # used from another client id is refused.
+  #
+  # zigbee2mqtt's `mqtt.client_id` is set to this same name in its
+  # configuration; change one and the other must follow.
+  zigbee2mqtt-hub-1:
+    roles: [zigbee-bridge]
+    client_ids: "%u"
+
+    # A hub reporting a houseful of sensors, not a fleet. Well above what
+    # zigbee2mqtt produces and far below what a broken client could.
+    limits:
+      publish_rate: 200
+      publish_bytes: 256KiB
+
+  # The radio gateway, and the one place this file cannot bind a credential
+  # as tightly as it would like.
+  #
+  # **rtl_433 computes its client id from its driver string** and offers no
+  # way to set it, so `client_ids: "%u"` would refuse it on every connection.
+  # The pattern below is the honest version: it still stops this password
+  # being used by a dashboard or by the Zigbee bridge, which is the theft
+  # this binding is for, and it cannot pin the credential to one name the
+  # way the bridge above is pinned. Worth knowing that a real integration
+  # sometimes only lets you go this far.
+  rtl433-hub-1:
+    roles: [rf-bridge]
+    client_ids: "rtl_433-*"
+
+    # Three sensors transmitting every few seconds, each arriving as a
+    # handful of single-field topics.
+    limits:
+      publish_rate: 100
+      publish_bytes: 64KiB
+
+  # Dashboards, by pattern, so adding one is a password and no edit here.
+  "viewer-*":
+    roles: [home-viewer]
+    client_ids: "%u"
+

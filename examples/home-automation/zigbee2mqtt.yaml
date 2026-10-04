@@ -1,0 +1,106 @@
+# zigbee2mqtt, pointed at saguin.
+#
+# This is a normal zigbee2mqtt configuration. Nothing here is saguin-specific
+# except the server address and the credentials - which is the claim the demo
+# makes: point it at saguin and it works, the way it works against Mosquitto.
+#
+# It goes to /app/data/configuration.yaml in the zigbee2mqtt container.
+# zigbee2mqtt REWRITES this file as it runs, so what is here is the starting
+# state rather than a file it leaves alone.
+
+version: 4
+
+mqtt:
+  base_topic: zigbee2mqtt
+  server: mqtt://saguin:1883
+
+  # The client id is half of this hub's identity. saguin's acl.yaml binds the
+  # credential to it with `client_ids: "%u"`, so the password alone is not
+  # enough to publish device state from somewhere else. Change this and change
+  # the user name in acl.yaml with it.
+  client_id: zigbee2mqtt-hub-1
+  user: zigbee2mqtt-hub-1
+  password: hub-password-change-me
+
+  # MQTT 5. zigbee2mqtt speaks 3.1.1 by default and saguin admits both, but 5
+  # is what carries reason codes on a refusal - so a wrong password or a
+  # filter the acl.yaml does not allow says which, rather than dropping the
+  # connection and leaving you to guess.
+  version: 5
+
+  # A link that comes and goes wants a keepalive short enough that the broker
+  # notices a dead hub, and long enough not to spend the radio on it. Sixty
+  # seconds is zigbee2mqtt's default and is right for a house.
+  keepalive: 60
+
+  # TLS, for when the broker has a certificate. Uncomment saguin's `tls:`
+  # block beside this, move its address to 8883, and change `server` above to
+  # `mqtts://saguin:8883`.
+  #
+  # `ca` is the authority that signed the BROKER's certificate. Naming it is
+  # what makes verification mean anything; the alternative is
+  # `reject_unauthorized: false`, which turns the check off and is why it is
+  # written here as a warning rather than as an option.
+  #
+  # ca: /app/data/tls/ca.pem
+  #
+  # `cert` and `key` are this client's own certificate, for mutual TLS - the
+  # pair to saguin's `client_ca_file`. With them, the certificate's Common
+  # Name becomes the user name and the `user`/`password` above are not needed
+  # at all.
+  #
+  # cert: /app/data/tls/hub.pem
+  # key: /app/data/tls/hub-key.pem
+  #
+  # Only if the name on the certificate is not the name you connect to.
+  # server_name: saguin.home.arpa
+  #
+  # Never set this to false outside a laboratory. It accepts any certificate,
+  # including one an attacker on the same network presented.
+  # reject_unauthorized: true
+
+serial:
+  # The radio, over the network rather than over USB.
+  #
+  # This demo answers here with an emulated coordinator, so it runs with no
+  # Zigbee hardware at all. A real network-attached coordinator - an SLZB-06,
+  # a flashed Sonoff ZBBridge, or any USB stick behind ser2net - answers the
+  # same way: change this address and nothing else in this file.
+  #
+  # A consumer hub is not this. Hue, Aqara and Tuya bridges run their own
+  # closed stack and never expose the radio.
+  port: tcp://coordinator:8888
+  adapter: zstack
+
+advanced:
+  # These three must match what the coordinator carries, emulated or real. On
+  # a mismatch zigbee2mqtt concludes the coordinator belongs to a different
+  # network and tries to commission a new one.
+  pan_id: 6754
+  ext_pan_id: [0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD, 0xDD]
+  network_key: [0x01, 0x03, 0x05, 0x07, 0x09, 0x0B, 0x0D, 0x0F, 0x00, 0x02, 0x04, 0x06, 0x08, 0x0A, 0x0C, 0x0D]
+  channel: 11
+
+  log_level: info
+
+# Off, so the demo is the MQTT side rather than zigbee2mqtt's own web page.
+# The saguin viewer is what this stack puts a browser on.
+frontend:
+  enabled: false
+
+# The devices this hub already has, and what to call them. Without this
+# zigbee2mqtt names a topic after the device's address - correct, and
+# unreadable. These addresses match seed/database.db and the emulator's
+# device table; change one and change all three.
+devices:
+  "0x00124b0011111101":
+    friendly_name: living-room-sensor
+  "0x00124b0011111102":
+    friendly_name: bedroom-sensor
+  "0x00124b0011111103":
+    friendly_name: kitchen-plug
+
+# No device may join by default. permit_join is a deliberate act, sent as a
+# command to `zigbee2mqtt/bridge/request/permit_join` - which the acl.yaml
+# beside this file lets a dashboard write and the bridge read.
+permit_join: false

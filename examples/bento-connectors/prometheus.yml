@@ -1,0 +1,54 @@
+# Prometheus, scraping the broker and the two pipelines driving it.
+#
+# scrape_interval matches broker.operations.min_scrape_interval in
+# saguin.yaml. saguin answers an early scrape from its previous catalogue
+# rather than refusing it - a refused scrape is a gap in the graph and
+# usually an alert, which would make being observed the incident - so a
+# mismatch here is not an error. It just means a panel can show a number
+# up to one interval old, which reads as a broker that has stopped.
+global:
+  scrape_interval: 60s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # By service name on the compose network. Not the published port on the
+  # host: that would leave the scrape crossing the machine's firewall, which
+  # on Linux drops it silently - a target that times out with nothing in any
+  # log to say why.
+  - job_name: saguin
+    metrics_path: /metrics
+
+    # /metrics is behind HTTP Basic and /health is not. These are the demo
+    # credentials this directory ships; README.md says how to make your own.
+    basic_auth:
+      username: prometheus
+      password: prometheus
+
+    static_configs:
+      - targets: ["saguin:9090"]
+
+  # Prometheus scraping itself, so that a reader who sees an empty saguin
+  # panel can tell "the broker is not answering" from "Prometheus is not
+  # running".
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # The two Bento pipelines, each its own job so a panel can say which end
+  # of the stack a line came from. Bento serves Prometheus metrics on its
+  # own HTTP port with nothing configured to make it - the same port its
+  # /ready health check is on.
+  #
+  # **What this buys is the picture the whole stack exists to draw**:
+  # records into saguin beside records out of it beside records into Kafka,
+  # on one axis. The three should track each other, and where they do not
+  # the gap is a backlog with a side.
+  - job_name: bento-datagen
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["iot-datagen:4195"]
+
+  - job_name: bento-bridge
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["mqtt2kafka:4195"]

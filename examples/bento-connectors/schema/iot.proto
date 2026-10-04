@@ -1,0 +1,42 @@
+syntax = "proto3";
+package iot;
+
+// Every field is fixed-width on the wire (float/double/fixed64, and a
+// constant-length device_id string), and `optional` forces every field to
+// always be encoded even at a zero value - so every message of a given
+// type is the exact same number of bytes, every time.
+
+// 46 bytes on the wire, always:
+//   device_id   tag(1)+len(1)+7   = 9
+//   timestamp_ms tag(1)+8         = 9
+//   temperature tag(1)+4          = 5
+//   humidity    tag(1)+4          = 5
+//   latitude    tag(1)+8          = 9
+//   longitude   tag(1)+8          = 9
+message WeatherMeasurement {
+  optional string  device_id    = 1; // always 7 chars, e.g. "trk-001"
+  optional fixed64 timestamp_ms = 2; // unix epoch milliseconds
+  optional float   temperature  = 3; // degrees C
+  optional float   humidity     = 4; // percent
+  optional double  latitude     = 5;
+  optional double  longitude    = 6;
+}
+
+// 32 bytes on the wire, always:
+//   device_id 9 -> 8 (6-char id) + timestamp_ms 9 + ph 5 + turbidity 5 + dissolved_minerals 5
+message WaterMeasurement {
+  optional string  device_id          = 1; // always 6 chars, e.g. "wq-001"
+  optional fixed64 timestamp_ms       = 2;
+  optional float   ph                 = 3;
+  optional float   turbidity          = 4; // NTU
+  optional float   dissolved_minerals = 5; // ppm
+}
+
+// 35 bytes on the wire, always:
+//   device_id 8 + timestamp_ms 9 + latitude 9 + longitude 9
+message WaterLocation {
+  optional string  device_id    = 1;
+  optional fixed64 timestamp_ms = 2;
+  optional double  latitude     = 3;
+  optional double  longitude    = 4;
+}

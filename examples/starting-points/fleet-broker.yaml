@@ -1,0 +1,60 @@
+# A fleet broker with TLS and ACLs: tens of thousands of devices, each allowed only its own topics, with events, current status and a work queue.
+# A starting point to adapt, not an answer: paths and sizes are placeholders.
+# A test loads it, so its keys stay valid; the files it names are placeholders.
+
+broker:
+  id: fleet-1
+  mqtt:
+    listen:
+      tcp:
+        address: 0.0.0.0:8883
+        # RFC 0002 "TLS on a listener": a fleet reaches the broker over
+        # networks nobody here controls.
+        tls:
+          cert_file: /etc/saguin/tls/cert.pem
+          key_file: /etc/saguin/tls/key.pem
+    password_file: /etc/saguin/clients.passwd
+    allow_anonymous: false
+    # RFC 0002 "What a client may do": each device reaches only its own
+    # topics.
+    acl_file: /etc/saguin/acl.yaml
+  # RFC 0002 "The operations listener": metrics and health on loopback.
+  operations:
+    listen:
+      tcp:
+        address: 127.0.0.1:9090
+  storage:
+    default: fleet
+    # RFC 0002 "Retention is stated once": three days by age, with the
+    # bound by size set per channel below.
+    default_retention_period: 3d
+    default_retention_bytes: none
+    providers:
+      fleet:
+        type: sqlite
+        file_path: /var/lib/saguin/fleet.db
+        max_bytes: 64GiB
+  limits:
+    # RFC 0002 "How long a socket may wait to send CONNECT": every socket
+    # holds a slot from the moment it arrives, so the fleet plus headroom.
+    max_connections: 50000
+    # RFC 0002 "Channel names" states the 30d default; a day bounds what a
+    # device that never returns keeps owed.
+    max_session_expiry: 1d
+channels:
+  events:
+    type: append
+    filter: fleet/+/events/#
+    retention_bytes: 20GiB
+  status:
+    type: latest
+    filter: fleet/+/status
+    retention_period: 30d
+  jobs:
+    type: queue
+    filter: fleet/+/work
+    visibility_timeout: 30s
+    retry:
+      max_attempts: 5
+      backoff: exponential
+      backoff_base: 2s

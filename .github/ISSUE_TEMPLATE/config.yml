@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/ifnesi/saguin/security/advisories/new
+    about: Report privately, not as a public issue. See SECURITY.md.
+  - name: Is it excluded on purpose?
+    url: https://github.com/ifnesi/saguin/blob/main/docs/rfcs/0001-overview-and-scope.md#non-goals
+    about: Clustering, high availability, MQTT extensions, and consumer groups are permanent non-goals, each with its reasoning.

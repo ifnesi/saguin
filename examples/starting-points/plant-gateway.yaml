@@ -1,0 +1,56 @@
+# An edge gateway on sqlite, bridged to a head office: devices over TLS, telemetry kept for a week on the gateway and shipped upstream.
+# A starting point to adapt, not an answer: paths and sizes are placeholders.
+# A test loads it, so its keys stay valid; the files it names are placeholders.
+
+broker:
+  id: plant-gw-1
+  mqtt:
+    listen:
+      tcp:
+        address: 0.0.0.0:8883
+        # RFC 0002 "TLS on a listener": devices reach the gateway over the
+        # plant network.
+        tls:
+          cert_file: /etc/saguin/tls/cert.pem
+          key_file: /etc/saguin/tls/key.pem
+    password_file: /etc/saguin/clients.passwd
+    allow_anonymous: false
+  # RFC 0002 "The operations listener": metrics and health on loopback,
+  # for a local agent to scrape.
+  operations:
+    listen:
+      tcp:
+        address: 127.0.0.1:9090
+  storage:
+    default: plant
+    # RFC 0002 "Retention is stated once": a week on the gateway, enough to
+    # ride out an upstream outage.
+    default_retention_period: 7d
+    default_retention_bytes: 512MiB
+    providers:
+      plant:
+        # RFC 0004: sqlite keeps what it acknowledged across a process
+        # crash; a power cut can lose the last commits.
+        type: sqlite
+        file_path: /var/lib/saguin/plant.db
+        max_bytes: 4GiB
+channels:
+  telemetry:
+    type: append
+    filter: plant/+/telemetry/#
+  setpoints:
+    type: latest
+    filter: plant/+/setpoint/#
+    # A setpoint is kept until it is replaced.
+    retention_period: none
+# RFC 0002 "Bridges": telemetry shipped to the head office under this
+# gateway's own prefix.
+bridges:
+  head-office:
+    peer: tls://mqtt.example.com:8883
+    client_id: plant-gw-1
+    session_expiry: 1d
+    topics:
+      - filter: plant/+/telemetry/#
+        topic: sites/plant-gw-1/$1/telemetry/$#
+        direction: out

@@ -1,0 +1,30 @@
+name: Idea or problem
+description: Something saguin should do and does not.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please skim
+        [non-goals.md](https://github.com/ifnesi/saguin/blob/main/docs/rfcs/0001-overview-and-scope.md#non-goals)
+        first. Clustering, high availability, MQTT protocol extensions,
+        consumer groups, exactly-once, and stream processing are permanent
+        exclusions with reasoning attached - the case for reopening one has
+        to engage with that reasoning.
+
+        Everything else is fair game, and a concrete use case is what moves
+        an idea forward.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that you cannot do today? Describe the situation, not the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you have in mind
+      description: Optional. A shape helps, but the problem above matters more. If it touches the wire, name the standard MQTT 5 mechanism it would use.
+    validations:
+      required: false

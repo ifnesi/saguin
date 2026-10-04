@@ -1,0 +1,20 @@
+# Pinned, because an image that resolves differently on two days is an image
+# nobody can reproduce a wrong answer against.
+
+# Embeddings, ONNX rather than PyTorch: this runs on a laptop beside a
+# broker, and the torch wheel alone is larger than everything else here put
+# together. It brings numpy, which app/semantic.py uses to hold the corpus's
+# vectors and score a query against them - the whole vector store, in a
+# process, for a corpus this size.
+fastembed==0.5.1
+
+Flask==3.1.0
+requests==2.32.3
+
+# Cloud providers only. Not needed for ollama, which is why these cost an
+# image layer only to an operator who selects one of them.
+boto3==1.35.68        # bedrock
+google-auth==2.36.0    # gcp - the bearer token for Vertex's REST API
+
+# Only for the question set, which reads questions.yaml.
+PyYAML==6.0.2

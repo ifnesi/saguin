@@ -1,0 +1,18 @@
+# The Python environment the examples need.
+#
+# paho-mqtt is Eclipse Paho's Python client and speaks MQTT 5, which the
+# demo needs - the properties it reads and echoes (Correlation Data,
+# Response Topic, User Properties, Session Expiry) are all MQTT 5. It is
+# what the *demo* asks for and no longer what the broker demands: saguin
+# admits MQTT 3.1.1 too. The tour stays on MQTT 5 throughout because the
+# properties above are what it is showing, not because the other door is
+# shut.
+#
+# Paho replaces separate mosquitto_pub, mosquitto_sub and queue-worker tools.
+# Python's standard sqlite3 module also lets the tour inspect the live database
+# without requiring the sqlite3 command-line program.
+#
+# Pinned exactly, because paho 2.0 changed the callback
+# signatures, and a demo that breaks on a library upgrade is a demo that
+# teaches somebody the broker is broken.
+paho-mqtt==2.1.0

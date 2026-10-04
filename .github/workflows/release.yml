@@ -1,0 +1,64 @@
+# Builds and publishes a release when a version tag is pushed, and on
+# nothing else. CONTRIBUTING.md "Cutting a release" lists the maintainer's steps.
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write   # create the GitHub release and upload the archives
+  packages: write   # push the container image to ghcr.io
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # The version is a constant in cmd/saguin/main.go, not a link-time
+      # variable, so nothing can inject the tag. Refuse a tag the binary
+      # does not agree with, and one whose CHANGELOG.md section has no date,
+      # before anything is published.
+      - name: tag agrees with the source
+        shell: bash
+        run: |
+          set -euo pipefail
+          want="${GITHUB_REF_NAME#v}"
+          got="$(go run ./cmd/saguin --version | sed -n '1s/^.*Sagüin //p')"
+          if [[ "$got" != "$want" ]]; then
+            echo "tag $GITHUB_REF_NAME needs Version = \"$want\" in cmd/saguin/main.go; the binary says \"$got\"" >&2
+            exit 1
+          fi
+          if ! grep -Eq "^## ${want//./\\.} - [0-9]{4}-[0-9]{2}-[0-9]{2}\$" CHANGELOG.md; then
+            echo "CHANGELOG.md has no dated \"## $want - YYYY-MM-DD\" section" >&2
+            exit 1
+          fi
+          # The release notes: that section, up to the next one.
+          awk -v h="## $want - " 'index($0,h)==1{f=1;next} /^## /{f=0} f' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          test -s "$RUNNER_TEMP/notes.md"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --release-notes=${{ runner.temp }}/notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Saguin Ask"
+  short_description: "Answer operational questions from saguin docs"
+  default_prompt: "Use $saguin-ask to answer this question from the saguin documentation."

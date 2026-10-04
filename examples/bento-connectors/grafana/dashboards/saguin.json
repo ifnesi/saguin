@@ -1,0 +1,3242 @@
+{
+  "uid": "saguin-overview",
+  "title": "saguin",
+  "description": "Every metric saguin emits. Panel descriptions carry the catalogue's own help text; hover the (i).",
+  "tags": [
+    "saguin"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "15s",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": []
+  },
+  "annotations": {
+    "list": []
+  },
+  "panels": [
+    {
+      "type": "row",
+      "id": 1,
+      "title": "The broker",
+      "description": "Everything that is about the process rather than about a channel.",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "id": 2,
+      "title": "Version",
+      "description": "saguin_build_info - always 1; the version and broker id are the point of it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_build_info",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{version}} / {{broker_id}}",
+          "instant": true,
+          "range": false
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 5,
+        "x": 0,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "name",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 3,
+      "title": "Uptime",
+      "description": "saguin_uptime_seconds - seconds since this process started.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_uptime_seconds",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "uptime"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 5,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 4,
+      "title": "Connected clients",
+      "description": "saguin_connections - clients connected now.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_connections",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "connections"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 9,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 5,
+      "title": "Subscriptions",
+      "description": "saguin_subscriptions - every subscription the broker holds, not only the ones on channels.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_subscriptions",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "subscriptions"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 13,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 6,
+      "title": "Session expiry cap",
+      "description": "saguin_max_session_expiry_seconds - the configured cap on how long a client may keep its session.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_max_session_expiry_seconds",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "cap"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 17,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 7,
+      "title": "Sessions capped",
+      "description": "saguin_session_expiry_shortened_total - CONNECTs that asked to keep their session for longer than the cap and were given the cap. Silent as far as the client is concerned, which is why it is counted.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_session_expiry_shortened_total",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "capped"
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 21,
+        "y": 1
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 8,
+      "title": "Connections",
+      "description": "saguin_connections held now, against saguin_connections_total accepted since start. A flat total with a moving level is clients reconnecting.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_connections",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "connected now"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_connections_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "accepted / min"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 9,
+      "title": "Subscriptions",
+      "description": "saguin_subscriptions - every subscription the broker holds, channel and broadcast alike.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_subscriptions",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "subscriptions"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 49,
+      "title": "Throughput on the wire",
+      "description": "saguin_bytes_received_total and saguin_bytes_sent_total as a rate - every byte crossing the MQTT listeners, payloads and acknowledgements and keepalives alike. This is the number to size a link against, and it is not how much payload the fleet sent. A bridge's traffic to an upstream broker is in neither.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_bytes_received_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "in"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_bytes_sent_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "out"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 50,
+      "title": "Messages a second, in and out",
+      "description": "saguin_publishes_received_total against saguin_deliveries_sent_total, as rates. Arrivals include publishes saguin went on to refuse; deliveries include a queue record handed out a second time. Out above in is fan-out - one publish reaching several subscribers - and out at zero while in moves is a fleet publishing to nobody.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_publishes_received_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "publishes in / s"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_deliveries_sent_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "deliveries out / s"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 13
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "id": 10,
+      "title": "Data deleted before it was read",
+      "description": "The one thing RFC 0005 says the whole catalogue exists to answer, and the one no other broker can.",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 29
+      },
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "id": 11,
+      "title": "Records deleted before someone read them",
+      "description": "saguin_channel_floor_offset minus saguin_channel_consumer_position_min, on the worst channel, and never below zero. Above zero means retention deleted records a durable consumer had not reached: data lost silently, which nothing in MQTT can express. Zero is the healthy state; the raw subtraction would be negative by however far the consumers are ahead of the floor, so it is shown clamped at zero. RFC 0005 states this as a comparison, floor_offset > consumer_position_min, and zero-or-above is that comparison with its magnitude kept. Empty means no channel has a durable consumer yet. It says records could have been lost; saguin_channel_position_lost_total, on the Retention panel, says the floor actually passed a reader's stored position - a consumer overtaken while reading, one told with Session Present = 0 when it came back, or an outbound bridge rule.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(clamp_min(saguin_channel_floor_offset - saguin_channel_consumer_position_min, 0))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "worst channel"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 30
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 12,
+      "title": "Retention floor against the slowest consumer",
+      "description": "Per channel: the oldest offset still readable, and the lowest offset any durable consumer has stored. The floor crossing above the position is the alert above firing.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_channel_floor_offset",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "floor {{channel}}"
+        },
+        {
+          "refId": "B",
+          "expr": "saguin_channel_consumer_position_min",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "slowest consumer {{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 18,
+        "x": 6,
+        "y": 30
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 43,
+      "title": "Durable consumers per channel",
+      "description": "How many devices hold a stored position. The panel beside this one says how far the worst of them is behind - on its own that cannot tell one straggler in a fleet from a single consumer that has stopped, and those are a device to replace in the morning against a page tonight. Zero is a fact, not an absence.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_channel_consumers",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 54,
+      "title": "Partitioned subscribers per channel",
+      "description": "How many subscribers declared a slice of this channel with saguin-filter on their SUBSCRIBE (RFC 0003). It is a denominator and nothing more. It does not show which slices are taken and deliberately does not show whether they cover the space: a missing index cannot be told from a member that has not connected yet, so a coverage panel would read as an alert during every rolling restart. Two members disagreeing about the size of the space is a WARN in the broker log, because that one cannot be correct.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_channel_partitioned_consumers",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 183
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "id": 13,
+      "title": "Channels",
+      "description": "What each channel holds, and what is arriving.",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 14,
+      "title": "What each channel is",
+      "description": "saguin_channel_info - always 1; the labels are the content: the topic filter the channel claims, its type, and the storage provider that holds it, which tells a memory-backed channel from a durable one.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_channel_info",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 47
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 15,
+      "title": "Records held",
+      "description": "saguin_channel_records - what a channel holds. An append channel's is its next offset minus its floor; a latest channel's is how many topics have a current value, which its store keeps rather than counts. A queue has neither and is drawn from its depth instead.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_channel_records",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 47
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 16,
+      "title": "Bytes held",
+      "description": "saguin_channel_bytes - append and queue channels only. A latest channel is not measured.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_channel_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 47
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 17,
+      "title": "Records accepted",
+      "description": "saguin_published_total as a rate. One series per channel plus one for broadcast. A dead-letter channel is always flat: records arrive there by the queue's own move, and a publish into one is refused. Beside it, saguin_latest_superseded_total as a rate: values on a latest channel a subscriber was not sent because a newer one for the same topic replaced them while they waited - the current value, not every intermediate one (RFC 0003). Not a loss; the only sign a latest subscriber reads more slowly than its topics change.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_published_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{channel}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_latest_superseded_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "replaced before sent {{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 55
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 18,
+      "title": "The next offset",
+      "description": "saguin_channel_next_offset - what this channel will assign next. It only ever rises; the slope is the arrival rate.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_channel_next_offset",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 55
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 19,
+      "title": "Retention",
+      "description": "saguin_channel_retention_removed_total - records retention has deleted, by age or by size - against saguin_channel_position_lost_total, readers whose stored position the retention floor passed, so records they had a claim on were unreadable. The second is invariant 1 firing, and counts occurrences rather than readers: every kind of reader and every way it is discovered - a consumer overtaken while connected and reading, which cannot be told; one whose stored position had been passed while it was away, which is told with Session Present = 0; and an outbound bridge rule's position.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_channel_retention_removed_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "removed {{channel}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_channel_position_lost_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "positions lost {{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 55
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "id": 20,
+      "title": "The queue",
+      "description": "Work in, work out, and every way a job can fail.",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 63
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "id": 21,
+      "title": "Depth and in flight",
+      "description": "saguin_queue_depth is unresolved work held; saguin_queue_inflight is what is out with a worker now. Depth climbing while in-flight stays flat is workers that cannot keep up.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_queue_depth",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "depth {{channel}}"
+        },
+        {
+          "refId": "B",
+          "expr": "saguin_queue_inflight",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "in flight {{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 22,
+      "title": "Delivered against acknowledged",
+      "description": "saguin_queue_delivered_total against saguin_queue_acknowledged_total. They track each other on a healthy queue; delivery running ahead of acknowledgement is work being retried.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_queue_delivered_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "delivered {{channel}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_queue_acknowledged_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "acknowledged {{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 64
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 23,
+      "title": "The four ways a job does not simply succeed",
+      "description": "returned: a worker handed it back and said so, available again at once. redelivered: a worker went silent and the visibility timeout took it back. dead-lettered: it spent max_attempts and moved to the dead-letter channel. expired: it aged out unresolved.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_queue_returned_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "returned {{channel}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_queue_redelivered_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "redelivered {{channel}}"
+        },
+        {
+          "refId": "C",
+          "expr": "rate(saguin_queue_dead_lettered_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "dead-lettered {{channel}}"
+        },
+        {
+          "refId": "D",
+          "expr": "rate(saguin_queue_expired_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "expired {{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 72
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 24,
+      "title": "Dead-lettered: still there, and in all",
+      "description": "saguin_queue_dead_lettered_total counts every record ever moved to a dead-letter channel, however the last attempt ended - it only rises. The channel itself holds what retention has not taken yet, so held + removed = the total, and on this stack dlq_retention_period is 15m, which is why they differ by so much after an hour. The number somebody has to go and look at is what is still there; the total says how often it has been happening.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(saguin_channel_records{channel=~\".+__dlq\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "held now"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(saguin_channel_retention_removed_total{channel=~\".+__dlq\"})",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "removed by retention"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(saguin_queue_dead_lettered_total)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "dead-lettered in all"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 72
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "held now"
+            },
+            "properties": [
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "green",
+                      "value": null
+                    },
+                    {
+                      "color": "orange",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 44,
+      "title": "Stuck: work held, and nothing resolving it",
+      "description": "Depth that does not fall while nothing is acknowledged is a queue whose workers have stopped taking work - or are taking it and never finishing. Built from counters the broker already keeps, so it costs a scrape nothing: no metric names the jobs, because a job is identified by a topic a client chose and a series per topic is unbounded. `GET /consumers` and the queue view answer which ones, on demand.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_queue_depth",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "depth {{channel}}"
+        },
+        {
+          "refId": "B",
+          "expr": "increase(saguin_queue_acknowledged_total[10m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "acknowledged, 10m {{channel}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 80
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "min"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "id": 25,
+      "title": "The bridge",
+      "description": "A link to a broker that has never heard of a channel.",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 88
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 26,
+      "title": "What each bridge is",
+      "description": "saguin_bridge_info - always 1; the label carries the peer this bridge dials, in either direction.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_bridge_info",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 89
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 27,
+      "title": "Link up",
+      "description": "saguin_bridge_connected - 1 while the link to the peer is up. Try `docker compose restart mosquitto` and watch this dip and come back.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_bridge_connected",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{bridge}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 8,
+        "y": 89
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "down",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "up",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "stat",
+      "id": 28,
+      "title": "Halted",
+      "description": "saguin_bridge_stopped - 1 when the bridge halted itself and will not reconnect: the upstream holds a record larger than this broker's max_message_size, so it disconnects rather than deliver it and every reconnection ends the same way on the same record. This is not a link failure and reconnecting would not fix it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_bridge_stopped",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{bridge}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 12,
+        "y": 89
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "running",
+                  "color": "green"
+                },
+                "1": {
+                  "text": "halted",
+                  "color": "red"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 29,
+      "title": "Records in",
+      "description": "saguin_bridge_received_total is what arrived from the peer, as a rate. It shared an axis with the reconnect count until that turned out to be two different units on one scale: a cumulative total never falls, so an old flap and a new one drew the same line, and a spike of two beside seventy-five records a minute was invisible anyway. Reconnects are the panel beside this one.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_bridge_received_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "received / min {{bridge}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 16,
+        "y": 89
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 47,
+      "title": "Reconnects, lately",
+      "description": "saguin_bridge_reconnects_total counts times the link came back after going away; a link that never lost it reports zero. Drawn as what the counter gained in the last five minutes rather than as its total, so it rises when the link is flapping now and returns to zero when it stops - which is the question this panel is for. The all-time figure is the counter itself, on /metrics.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "increase(saguin_bridge_reconnects_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "reconnects, last 5m {{bridge}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 4,
+        "x": 20,
+        "y": 89
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 67,
+      "title": "Records out",
+      "description": "saguin_bridge_sent_total is what this broker forwarded to the peer, as a rate. Read it beside the panel next to it: a bridge that is connected, sending nothing and skipping everything looks on this one alone exactly like a bridge with nothing to send.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_bridge_sent_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{bridge}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 97
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 68,
+      "title": "Not sent: loops, refusals, drops",
+      "description": "saguin_bridge_loops_skipped_total counts records not forwarded because they arrived over a bridge - a record that came in over a link is never sent back out over one, which is what stops a loop. This climbing while the panel beside it stays flat is a topology somebody built: two brokers pointed at each other, the guard working, and the records going nowhere. Beside them, saguin_bridge_unsent_total by cause: peer_refused (check the peer's ACL), broadcast_refused (the shed), unmappable (the bridge's configuration), live_queue_full (a broadcast record dropped rather than hold up publishers), superseded (a latest value replaced by a newer one before it crossed - not a loss). And the inbound half, saguin_bridge_unstored_total by cause: no_rule (the peer sent a topic no inbound rule covers), unmappable (the bridge's configuration), never_accepted (a record saguin refuses whatever the channel), queue_full (a QoS 0 record from the peer dropped because the bridge's queue was full behind a channel that was not taking it).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_bridge_loops_skipped_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{bridge}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_bridge_unsent_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "not sent: {{cause}} {{bridge}}"
+        },
+        {
+          "refId": "C",
+          "expr": "rate(saguin_bridge_unstored_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "not stored: {{cause}} {{bridge}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 97
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "id": 30,
+      "title": "Storage",
+      "description": "The providers underneath the channels.",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 105
+      },
+      "panels": []
+    },
+    {
+      "type": "table",
+      "id": 31,
+      "title": "What each provider is",
+      "description": "saguin_provider_info - always 1; the type is memory or sqlite.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_provider_info",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "instant": true,
+          "range": false,
+          "format": "table"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 106
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 32,
+      "title": "Bytes held against the bound",
+      "description": "saguin_provider_bytes against saguin_provider_max_bytes. The bound refuses writes rather than deleting, which is the difference from retention: a full provider says no and keeps every channel's records, giving up only the broadcast log's oldest where broker.session.storage is on it. Bytes held covers every channel on the provider, a latest channel included - which the channel panels do not measure - so it is larger than those summed. On sqlite it is the database's own size and not its disk usage: a write-ahead log waiting to be checkpointed is real bytes on that disk and is not in this number.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_provider_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "held {{provider}}"
+        },
+        {
+          "refId": "B",
+          "expr": "saguin_provider_max_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "bound {{provider}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 8,
+        "y": 106
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "id": 33,
+      "title": "Storage errors",
+      "description": "saguin_storage_errors_total - storage calls that failed, by provider, on every store: the channels, the sessions, the broadcast log and the retained store. A channel at its size bound is NOT one of these: that is a refusal, and it is counted under publishes refused. Empty is the expected reading, and this demonstration cannot produce one deliberately - it would need a real disk failure.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(saguin_storage_errors_total)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "errors"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 106
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {},
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "noValue": "no series - nothing has failed"
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 38,
+      "title": "Records per transaction, against the ceiling",
+      "description": "saguin_storage_committed_records_total over saguin_storage_commits_total, with saguin_provider_publish_commit_max_records beside it - the average batch size against its ceiling. This is the one reading that says whether collecting publishes is doing anything: a provider that collects and one that commits every publish singly hold identical records, identical offsets and identical counter rows, and only the wait differs. Where publish_commit_interval is set, a batch size far below the ceiling means every transaction is waiting out the interval and collecting almost nothing, which is slower than not collecting at all. The fix is to lower publish_commit_max_records to the number of connections publishing at once, or to remove both keys. Without the keys a batch size near one only means little arrives at once, and costs nothing. Absent on a memory provider, which has no transaction to collect into.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_storage_committed_records_total[5m])\n  / sum without(closed_by) (rate(saguin_storage_commits_total[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "records per transaction {{provider}}"
+        },
+        {
+          "refId": "B",
+          "expr": "saguin_provider_publish_commit_max_records",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "publish_commit_max_records {{provider}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 114
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 39,
+      "title": "What closes a transaction",
+      "description": "saguin_storage_commits_total by closed_by - `records` is a transaction that filled and committed at once, `interval` one that did not fill and waited, `commit` one that held what arrived while the transaction before it committed, which is the default and never waits, `unbatched` a provider with publish_commit_interval: none. Where `interval` is nearly all of it, publish_commit_max_records is set above the traffic: the count is never reached, so every commit costs a fixed wait. The same fault shows in the panel beside this one as a batch size far below the ceiling. A retention sweep and a queue resolution are transactions too and are not counted here.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_storage_commits_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{provider}} closed by {{closed_by}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 114
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "cps",
+          "min": 0,
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "id": 34,
+      "title": "Broadcast, and what was refused",
+      "description": "The paths that are not a channel, and the answers a publisher got.",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 122
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "id": 35,
+      "title": "Publishes and subscriptions refused, and flags dropped",
+      "description": "saguin_publish_refused_total, by the MQTT specification's name for the reason code answered - never the sentence sent beside it. not authorized is 0x87. 0x97 is split three ways: publish rate exceeded is a client over its publish_rate or publish_bytes, inflight allowance exceeded a publisher holding broker.qos2.max_inflight_per_client unfinished exactly-once exchanges, and quota exceeded the rest - a channel or a provider at its max_bytes, which arrives here rather than under storage errors, or a publish over max_header_count or max_header_bytes. rejected is a refusal that carried no code. Beside them, the retain flag a queue dropped: that publish was accepted and stored as work, and the flag asked for a store a queue is not - so it is a producer expecting state where the configuration says work, rather than anything the broker refused. And saguin_subscriptions_refused_total: topic filters a SUBACK refused, by the name of the code decided for each - before a 3.1.1 client's is written as 0x80.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_publish_refused_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "reason {{reason}}"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_queue_retain_ignored_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "retain flag dropped {{channel}}"
+        },
+        {
+          "refId": "C",
+          "expr": "rate(saguin_subscriptions_refused_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "subscription refused {{reason}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 123
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 36,
+      "title": "Broadcast that reached nobody",
+      "description": "saguin_broadcast_unmatched_total - publishes that matched no subscription and no channel. MQTT has no reason code for this: the PUBACK says 0x00 and the record is gone, so this counter is the only thing that will ever tell you a channel name is misspelt.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_broadcast_unmatched_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "unmatched / min"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 123
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 37,
+      "title": "Deliveries discarded",
+      "description": "The three ways a delivery does not arrive. saguin_deliveries_dropped_total is a subscriber's outbound queue overflowing; saguin_deliveries_refused_total is the layer before it, where the client has not acknowledged enough for the broker to have room to send; saguin_deliveries_expired_total is the publisher's own Message Expiry Interval running out. The first two are the same complaint about a slow subscriber and watching only one of them sees half the loss. saguin_session_deliveries_dropped_total says why a delivery never reached a session, by cause: session_queue_full is a delivery given up or refused at limits.session_queue_bytes, no_shared_member a shared group with nobody able to take the message, packet_ids_exhausted a session with no packet identifier left, storage_full the provider broker.session.storage names with no room - for the broadcast log, or for any other write on that provider - and too_large a delivery over the client's Maximum Packet Size, discarded rather than sent.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_deliveries_dropped_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "dropped / min"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_deliveries_expired_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "expired / min"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "expr": "rate(saguin_deliveries_refused_total[5m]) * 60",
+          "legendFormat": "refused: the subscriber's window was full / min"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "expr": "rate(saguin_session_deliveries_dropped_total[5m]) * 60",
+          "legendFormat": "never reached a session: {{cause}} / min"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 131
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 48,
+      "type": "row",
+      "title": "The fleet, and what it speaks",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 139
+      },
+      "panels": []
+    },
+    {
+      "id": 40,
+      "type": "row",
+      "title": "The pipelines",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 174
+      },
+      "panels": []
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "Records a second, end to end",
+      "description": "The load this dashboard is drawn against, from Bento's own metrics rather than saguin's. Into saguin is the generator's output; out of saguin is the bridge's input; into Kafka is the bridge's output. The three track each other on a stack that is keeping up, and where they separate the gap is a backlog with a side to it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 16,
+        "x": 0,
+        "y": 175
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "editorMode": "code",
+          "range": true,
+          "refId": "A",
+          "expr": "sum(rate(output_sent{job=\"bento-datagen\"}[$__rate_interval]))",
+          "legendFormat": "into saguin"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "editorMode": "code",
+          "range": true,
+          "refId": "B",
+          "expr": "sum(rate(input_received{job=\"bento-bridge\"}[$__rate_interval]))",
+          "legendFormat": "out of saguin"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "editorMode": "code",
+          "range": true,
+          "refId": "C",
+          "expr": "sum(rate(output_sent{job=\"bento-bridge\"}[$__rate_interval]))",
+          "legendFormat": "into Kafka"
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "Pipeline failures",
+      "description": "Publications and productions Bento could not complete: output_error on each pipeline. A saguin refusal reaches the generator here, and a Kafka one reaches the bridge - which is the half of a refusal the broker's own \"Publishes refused\" panel cannot show, because it counts what saguin answered rather than what the publisher did about it. Flat at zero is the expected reading.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 175
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 1,
+            "fillOpacity": 8,
+            "showPoints": "never"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "editorMode": "code",
+          "range": true,
+          "refId": "A",
+          "expr": "sum(rate(output_error{job=\"bento-datagen\"}[$__rate_interval]))",
+          "legendFormat": "generator"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "editorMode": "code",
+          "range": true,
+          "refId": "B",
+          "expr": "sum(rate(output_error{job=\"bento-bridge\"}[$__rate_interval]))",
+          "legendFormat": "bridge"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 45,
+      "title": "The fleet mix",
+      "description": "saguin_connections_by_protocol - clients connected now, by the MQTT version each connected with. When both protocols are admitted this is how much of the estate is still on 3.1.1, and whether that number is coming down.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_connections_by_protocol",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{protocol}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 140
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 46,
+      "title": "Connections refused",
+      "description": "saguin_connections_refused_total - connections this broker turned away, on any protocol: a CONNECT refused, or a connection ended for a refusal. A rate that stays up is a fleet in a reconnect loop, and the reason label says which refusal is causing it.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_connections_refused_total[5m]) * 60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 140
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 52,
+      "title": "Sessions nothing is connected to",
+      "description": "saguin_sessions_offline against saguin_connections. A session outliving its connection is what a session is for, so this is a fleet's shape rather than a fault - but it is the question the connection count cannot answer: three hundred devices with two hundred connected is either a rota or a hundred that have stopped calling. A line that only climbs is sessions nothing is coming back for, held until their expiry. Beside them, saguin_session_queue_messages and saguin_session_queue_bytes: the deliveries every session holds that its client has not acknowledged, on the wire, waiting for room in the client's window or queued while it is away, and the memory they take - one session's share bounded by limits.session_queue_bytes. saguin_sessions_dropped_total, the fifth line, is sessions the session store could not keep, by cause: storage_full, a session that asked to outlive its connection while the provider broker.session.storage names was at its max_bytes, and was told in its CONNACK that it ends with the connection; expired_while_stopped, a session whose expiry passed while the broker was stopped, ended when it started; subscription_refused, a session ended at a start because it held a subscription this broker's rules now refuse - a channel that became a queue, most often - so its client comes back to Session Present = 0. saguin_sessions_restored_total, the sixth, is how many sessions this broker put back when it started, from what that provider kept while it was stopped: it steps once at the start and then stands still, and a start that put none back on a fleet of persistent sessions is a session store that did not keep them.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_sessions_offline",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "offline"
+        },
+        {
+          "refId": "B",
+          "expr": "saguin_connections",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "connected"
+        },
+        {
+          "refId": "C",
+          "expr": "saguin_session_queue_messages",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "deliveries sessions hold unacknowledged"
+        },
+        {
+          "refId": "D",
+          "expr": "saguin_session_queue_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "memory those deliveries take"
+        },
+        {
+          "refId": "E",
+          "expr": "sum by (cause) (increase(saguin_sessions_dropped_total[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "sessions not kept: {{cause}}"
+        },
+        {
+          "refId": "F",
+          "expr": "saguin_sessions_restored_total",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "put back at the last start"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 21
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "D"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "bytes"
+              },
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 53,
+      "title": "Wills: deaths announced on a client's behalf",
+      "description": "saguin_wills_published_total by cause, with saguin_wills_waiting and saguin_wills_cancelled_total beside them. A Will is the one message a broker sends for a client that has gone: immediate is a link that died with no Will Delay Interval set, delayed is one whose delay ran out, session_ended is a session that expired while its Will was still waiting, and start is a Will the broker found already owed when it started - the delay passed, or the session ended, while it was stopped. Waiting is how many deaths are held and not yet announced; cancelled is the delay doing its job, a device that came back inside its interval and was therefore never announced. Nothing is published because the broker itself stopped, so a restart moves none of these for the clients it disconnects. And a Will the broker refused when it fired - a full channel, a storage failure - is logged and not counted here.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cause) (increase(saguin_wills_published_total[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "published: {{cause}}"
+        },
+        {
+          "refId": "B",
+          "expr": "saguin_wills_waiting",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "waiting out a delay"
+        },
+        {
+          "refId": "C",
+          "expr": "increase(saguin_wills_cancelled_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "cancelled by a reconnect"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 53,
+      "title": "Retained messages held",
+      "description": "saguin_retained_messages - saguin's own retained store, not the substrate's, whose count is wrong about this broker. They accumulate until something publishes an empty payload to the topic or broker.retained.retention_period removes them, and nothing else says how many there are.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_retained_messages",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "held"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 21
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {}
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ],
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "type": "row",
+      "id": 60,
+      "title": "Exactly-once",
+      "collapsed": false,
+      "panels": [],
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 148
+      }
+    },
+    {
+      "type": "stat",
+      "id": 61,
+      "title": "Held now",
+      "description": "saguin_qos2_held - exactly-once publishes received and not yet released. The broker has taken ownership of these at their PUBREC and no client has finished sending them, so a figure that climbs and stays is publishers not completing exchanges. Always reported: every broker offers QoS 2.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_qos2_held",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 149
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "id": 62,
+      "title": "Allowance, per client",
+      "description": "saguin_qos2_max_inflight_per_client - the configured broker.qos2.max_inflight_per_client. Past it a publisher's next exactly-once message is refused 0x97 on its receipt and the connection is left alone.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_qos2_max_inflight_per_client",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 149
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "id": 63,
+      "title": "Never finished",
+      "description": "saguin_qos2_abandoned_total - exactly-once publishes taken in and never released, because their session ended, they aged past broker.qos2.expires_after, or a start dropped them (RFC 0003 has when). Nothing else shows them: the publisher has had its receipt and is simply never answered.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_qos2_abandoned_total",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          }
+        }
+      ],
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 149
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 64,
+      "title": "Held, over time",
+      "description": "saguin_qos2_held over time. It should rise and fall with traffic and come back to nothing; a floor that never returns is exchanges nobody is finishing.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_qos2_held",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "held"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 153
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 65,
+      "title": "Never finished, over time",
+      "description": "saguin_qos2_abandoned_total over time. It only ever climbs, so what to read is the slope rather than the value.",
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_qos2_abandoned_total",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "abandoned"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 153
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {}
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 66,
+      "title": "What shared groups are holding, and what they dropped",
+      "description": "Held counts deliveries put on a shared group's list; drained counts those handed to a member; dropped counts those let go otherwise. Holding now is held minus drained minus dropped: exactly what the groups hold. Drained flat while held climbs is a fleet that is not coming back, and the backlog is spending its provider until one does. Dropped, by cause: backlog_full at limits.session_queue_bytes, no_member_left when the last session that could collect it ended, expired past broker.share.expires_after or the publisher's Message Expiry, storage_full when broker.session.storage had no room, member_ended for a QoS 2 delivery whose member ended before its PUBREC, not_authorized when the acl_file allowed it to no member that could take it.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 192
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_shares_held_total",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "held"
+        },
+        {
+          "refId": "B",
+          "expr": "saguin_shares_drained_total",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "drained"
+        },
+        {
+          "refId": "C",
+          "expr": "saguin_shares_dropped_total",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "dropped {{cause}}"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(saguin_shares_held_total) - sum(saguin_shares_drained_total) - sum(saguin_shares_dropped_total)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "holding now"
+        }
+      ]
+    },
+    {
+      "type": "row",
+      "id": 69,
+      "title": "The Go runtime",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 157
+      },
+      "panels": []
+    },
+    {
+      "type": "timeseries",
+      "id": 70,
+      "title": "Garbage collections a second",
+      "description": "Collections completed a second, the rate of saguin_go_gc_cycles_total: the figure that shows a small heap collecting too often. 24 a second rising to 47 was a 13% CPU regression, found on 28 Sep only with a profiling build. The Go runtime's own figure, read at scrape.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 158
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_go_gc_cycles_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "collections/s"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 71,
+      "title": "CPU spent collecting",
+      "description": "CPU seconds a second spent collecting garbage, and the part of it the broker's own goroutines spent helping the collector (assists). The runtime's estimate: it counts a stop-the-world pause as every processor's time, so it is an upper bound.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 158
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_go_gc_cpu_seconds_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "collecting"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_go_gc_assist_cpu_seconds_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "assists"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "id": 72,
+      "title": "Heap and stacks",
+      "description": "Live is the heap the last collection found reachable, the 8 MB heap floor included; goal is where the next collection starts; stacks is the memory held for goroutine stacks.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 158
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_go_heap_live_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "live"
+        },
+        {
+          "refId": "B",
+          "expr": "saguin_go_heap_goal_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "goal"
+        },
+        {
+          "refId": "C",
+          "expr": "saguin_go_stack_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "stacks"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "id": 73,
+      "title": "Allocation",
+      "description": "Heap bytes and objects allocated a second: what the collector has to clear up after. A rise here with the message rate flat is a change in what each message costs.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 166
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(saguin_go_allocated_bytes_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "bytes/s"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(saguin_go_allocated_objects_total[5m])",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "objects/s"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "id": 74,
+      "title": "GOGC and GOMEMLIMIT",
+      "description": "The effective GOGC (-1 when collection is off) and GOMEMLIMIT. With no limit set the limit reads math.MaxInt64 (9.2e18), which means none. RFC 0005 \"The runtime's own pauses, and the two variables that move them\".",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 166
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "saguin-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "saguin_go_gogc_percent",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "GOGC"
+        },
+        {
+          "refId": "B",
+          "expr": "saguin_go_memory_limit_bytes",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "saguin-prometheus"
+          },
+          "legendFormat": "GOMEMLIMIT"
+        }
+      ]
+    }
+  ]
+}

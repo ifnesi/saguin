@@ -1,0 +1,556 @@
+# docker-compose.yml - the two connectors, everything they talk to, and two
+# windows onto the data.
+#
+#   docker compose up
+#
+# Thirteen containers on one network. The four with a page worth opening:
+#
+#   viewer            http://localhost:4000   the MQTT side: a topic tree, decoded
+#   grafana           http://localhost:3000   saguin's own metrics, every one
+#   control-center    http://localhost:9021   the Kafka side: topics and messages
+#   prometheus        http://localhost:9094   the series behind the dashboard
+#
+#   saguin            MQTT 5 broker, anonymous, no TLS         localhost:1883
+#                     operations listener, /metrics behind Basic  localhost:9090
+#   kafka             single-node KRaft Kafka, no auth or TLS  localhost:9092
+#   mosquitto         the upstream saguin's bridge reads from  localhost:1884
+#   iot-datagen       Bento: simulated sensors -> saguin
+#   mqtt2kafka        Bento: saguin -> kafka
+#   traffic           the queue, the bridge and the mistakes Bento cannot drive
+#   schema-registry   http://localhost:8081, REST only, and empty
+#   c3-prometheus     http://localhost:9099, what Control Center draws from
+#   alertmanager      where a fired Control Center rule would go
+#
+# **Two Prometheus instances, and they are not interchangeable.**
+# `c3-prometheus` is Confluent's, preconfigured with the recording rules
+# Control Center needs and fed by Kafka over OTLP push. `prometheus` is an
+# ordinary one that scrapes saguin and both Bento pipelines, and is what
+# Grafana draws from. Merging them would mean rewriting a generated config
+# that the Confluent image owns.
+#
+# **Four images are built here rather than pulled**, and each says why on its
+# service. saguin has no published container image; no published Bento image
+# has the `mqtt_v5` input and output this stack needs; and the traffic
+# generator and the viewer are written for this demonstration.
+#
+# The `z` on each bind mount relabels the mounted files for SELinux. It is
+# needed on Fedora, RHEL and their relatives, and ignored everywhere else.
+
+# **Every container's log is bounded, because Docker's default is not.**
+# RFC 0005 says saguin writes to standard output and rotates nothing: what
+# keeps that bounded is the supervisor, and under Docker the supervisor is
+# the logging driver. `json-file` with no options grows until the disk does -
+# which on a stack somebody leaves running is the whole disk, and the broker
+# is then the thing that stops.
+#
+# Ten megabytes and three files each: enough to read back a failure, and a
+# hard ceiling of thirty per container. Written once here rather than
+# fourteen times below.
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+# Both pipelines run the same locally-built Bento. The anchor is so that the
+# build is described once; Compose builds the image once and both services
+# use it.
+x-bento: &bento
+  image: bento-connectors-bento:local
+  build:
+    # The repository root, because one Dockerfile builds all three images
+    # here and two of them compile out of this checkout.
+    context: ../..
+    dockerfile: examples/bento-connectors/Dockerfile
+    target: bento
+  working_dir: /connectors
+  volumes:
+    - ./:/connectors:ro,z
+
+name: bento-connectors
+
+services:
+  saguin:
+    <<: *logging
+    # The broker. **Built from this checkout, not pulled**: saguin has no
+    # published container image yet, and Dockerfile says why an example
+    # builds one rather than reaching a broker on the host.
+    build:
+      context: ../..
+      dockerfile: examples/bento-connectors/Dockerfile
+      target: broker
+    container_name: bento-saguin
+    depends_on:
+      # The bridge's upstream. Not a health condition: saguin retries the
+      # link on its own and counts the reconnects, which is a thing worth
+      # seeing on the dashboard rather than hiding behind start order.
+      - mosquitto
+    ports:
+      - "1883:1883"
+      # The operations listener. Prometheus reaches saguin:9090 on the
+      # compose network and does not use this; it is published so a reader
+      # can curl /metrics by hand.
+      - "9090:9090"
+    volumes:
+      - ./saguin.yaml:/etc/saguin/saguin.yaml:ro,z
+      - ./operations.passwd:/etc/saguin/operations.passwd:ro,z
+      # **The database, on a volume rather than in the container's own
+      # layer.** Without this, recreating the container - which is what
+      # `up --build` does after any edit to the broker - takes every record,
+      # every stored consumer position and every `latest` value with it. The
+      # water stations publish their coordinates exactly once, at startup,
+      # so a broker that came back empty served none of them ever again
+      # while reporting itself perfectly healthy: the one failure a
+      # demonstration of a *durable* broker must not have.
+      #
+      # `docker compose down -v` is the reset. `down` on its own now keeps
+      # the data, which is the point of it.
+      - saguin-data:/var/lib/saguin
+    healthcheck:
+      # saguin's operations listener, on loopback inside the container -
+      # saguin.yaml says why it is there. /health answers 200 once the
+      # broker is accepting connections, which is what the two pipelines
+      # below wait for.
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9090/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+
+  kafka:
+    <<: *logging
+    # Confluent Server - Kafka, plus the telemetry reporter that Control
+    # Center's charts are drawn from. Same broker protocol as open-source
+    # Kafka, so the bridge neither knows nor cares which one it produces
+    # to; what it adds is the metrics feed nothing else here provides.
+    image: confluentinc/cp-server:8.3.0
+    hostname: kafka
+    container_name: bento-kafka
+    ports:
+      - "9092:9092"
+      - "9101:9101"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_CONFLUENT_LICENSE_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_CONFLUENT_BALANCER_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      KAFKA_CONFLUENT_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      KAFKA_METRIC_REPORTERS: io.confluent.telemetry.reporter.TelemetryReporter
+      CONFLUENT_METRICS_REPORTER_BOOTSTRAP_SERVERS: kafka:29092
+      CONFLUENT_METRICS_REPORTER_TOPIC_REPLICAS: 1
+      KAFKA_PROCESS_ROLES: 'broker,controller'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
+      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
+      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
+      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      CONFLUENT_METRICS_ENABLE: 'true'
+      CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
+      # Replace CLUSTER_ID with a unique base64 UUID using "bin/kafka-storage.sh random-uuid"
+      # See https://docs.confluent.io/kafka/operations-tools/kafka-tools.html#kafka-storage-sh
+      CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_TYPE: "http"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_ENABLED: "true"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_METRICS_INCLUDE: "io.confluent.kafka.server.request.(?!.*delta).*|io.confluent.kafka.server.server.broker.state|io.confluent.kafka.server.replica.manager.leader.count|io.confluent.kafka.server.request.queue.size|io.confluent.kafka.server.broker.topic.failed.produce.requests.rate.1.min|io.confluent.kafka.server.tier.archiver.total.lag|io.confluent.kafka.server.request.total.time.ms.p99|io.confluent.kafka.server.broker.topic.failed.fetch.requests.rate.1.min|io.confluent.kafka.server.broker.topic.total.fetch.requests.rate.1.min|io.confluent.kafka.server.partition.caught.up.replicas.count|io.confluent.kafka.server.partition.observer.replicas.count|io.confluent.kafka.server.tier.tasks.num.partitions.in.error|io.confluent.kafka.server.broker.topic.bytes.out.rate.1.min|io.confluent.kafka.server.request.total.time.ms.p95|io.confluent.kafka.server.controller.active.controller.count|io.confluent.kafka.server.request.total.time.ms.p999|io.confluent.kafka.server.controller.active.broker.count|io.confluent.kafka.server.request.handler.pool.request.handler.avg.idle.percent.rate.1.min|io.confluent.kafka.server.controller.unclean.leader.elections.rate.1.min|io.confluent.kafka.server.replica.manager.partition.count|io.confluent.kafka.server.controller.unclean.leader.elections.total|io.confluent.kafka.server.partition.replicas.count|io.confluent.kafka.server.broker.topic.total.produce.requests.rate.1.min|io.confluent.kafka.server.controller.offline.partitions.count|io.confluent.kafka.server.socket.server.network.processor.avg.idle.percent|io.confluent.kafka.server.partition.under.replicated|io.confluent.kafka.server.log.log.start.offset|io.confluent.kafka.server.log.tier.size|io.confluent.kafka.server.log.size|io.confluent.kafka.server.tier.fetcher.bytes.fetched.total|io.confluent.kafka.server.request.total.time.ms.p50|io.confluent.kafka.server.tenant.consumer.lag.offsets|io.confluent.kafka.server.log.log.end.offset|io.confluent.kafka.server.broker.topic.bytes.in.rate.1.min|io.confluent.kafka.server.partition.under.min.isr|io.confluent.kafka.server.partition.in.sync.replicas.count|io.confluent.telemetry.http.exporter.batches.dropped|io.confluent.telemetry.http.exporter.items.total|io.confluent.telemetry.http.exporter.items.succeeded|io.confluent.telemetry.http.exporter.send.time.total.millis|io.confluent.kafka.server.controller.leader.election.rate.(?!.*delta).*|io.confluent.telemetry.http.exporter.batches.failed"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_CLIENT_BASE_URL: "http://c3-prometheus:9090/api/v1/otlp"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_CLIENT_COMPRESSION: "gzip"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_API_KEY: "dummy"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_API_SECRET: "dummy"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_BUFFER_PENDING_BATCHES_MAX: "80"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_BUFFER_BATCH_ITEMS_MAX: "4000"
+      KAFKA_CONFLUENT_TELEMETRY_EXPORTER_C3PLUSPLUS_BUFFER_INFLIGHT_SUBMISSIONS_MAX: "10"
+      KAFKA_CONFLUENT_TELEMETRY_METRICS_COLLECTOR_INTERVAL_MS: "60000"
+      KAFKA_CONFLUENT_TELEMETRY_REMOTECONFIG_CONFLUENT_ENABLED: "false"
+      KAFKA_CONFLUENT_CONSUMER_LAG_EMITTER_ENABLED: "true"
+    healthcheck:
+      # cp-server keeps its tools in /usr/bin without the .sh, and the
+      # internal listener binds to the name `kafka` rather than to
+      # 0.0.0.0 - so nothing is listening on 127.0.0.1:29092 to ask.
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server kafka:29092 >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 20
+
+  kafka-topics:
+    <<: *logging
+    # **The topics, created rather than auto-created - and the two fed by a
+    # `latest` channel compacted.**
+    #
+    # `water-location` is fed by a saguin `latest` channel, which holds the
+    # current value of each topic and nothing else. The Kafka topic that
+    # mirrors it should say the same thing about itself: keyed by the MQTT
+    # topic, compacted, so a consumer reading it from the beginning gets one
+    # record per station rather than every position ever sent. Auto-creation
+    # gave it `cleanup.policy=delete` like the other two, which makes the
+    # copy a log of a thing that is not a log.
+    #
+    # `schemas` is the same shape and compacted for the same reason: it
+    # mirrors the schema registry saguin holds in a `latest` channel, where
+    # the current definition of each schema is the whole of what it means.
+    # A consumer reading it from the beginning should get one record per
+    # schema rather than every revision ever published.
+    #
+    # The rest are append channels and stay `delete`: a history is what they
+    # are.
+    #
+    # It exits when it is done. `docker compose ps` shows it stopped, which
+    # is the correct state for a job rather than a service.
+    image: confluentinc/cp-server:8.3.0
+    container_name: bento-kafka-topics
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        create() {
+          kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists \
+            --topic "$$1" --partitions 1 --replication-factor 1 --config "cleanup.policy=$$2"
+          echo "  $$1: cleanup.policy=$$2"
+        }
+        create weather-measurement delete
+        create water-measurement  delete
+        create water-location     compact
+        create jobs-dlq           delete
+        create schemas            compact
+        echo "topics ready"
+
+  schema-registry:
+    <<: *logging
+    # Confluent Schema Registry: stores record schemas and hands each one a
+    # numeric id, so producers can write a 5-byte reference instead of the
+    # whole schema. Nothing in this stack registers anything yet - the
+    # bridge produces plain JSON - so it starts empty and stays empty. It
+    # is here for Control Center, which expects to be able to ask.
+    image: confluentinc/cp-schema-registry:8.3.0
+    hostname: schema-registry
+    container_name: schema-registry
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: 'kafka:29092'
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+    healthcheck:
+      # No curl/wget in this image - python3 is available instead.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/subjects', timeout=5)"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 20s
+
+  c3-prometheus:
+    <<: *logging
+    # Prometheus, packaged by Confluent with the scrape config C3 expects.
+    # Kafka pushes its metrics here over OTLP; this is where every number on
+    # a Control Center chart comes from, and it draws nothing from saguin.
+    image: confluentinc/cp-enterprise-prometheus:2.6.0
+    hostname: cp-enterprise-prometheus
+    container_name: bento-c3-prometheus
+    volumes:
+      - ./vol/config:/mnt/config:z
+    ports:
+      # 9099 rather than 9090, which saguin's operations listener has.
+      - "9099:9090"
+    environment:
+      CONFIG_PATH: "/mnt/config"
+      # Quoted on purpose. Unquoted, YAML makes this a boolean and the
+      # value reaches the container as "False", which the image's own
+      # start script compares against a lower-case "false", never sets
+      # LOG_FILE, and exits on its `set -u`.
+      SHOULD_LOG_TO_FILE: "false"
+
+  alertmanager:
+    <<: *logging
+    # Alertmanager, packaged by Confluent. Receives whatever Prometheus
+    # rules fire and would route them onward. Nothing is configured to go
+    # anywhere, but Control Center refuses to draw its alerts page
+    # without something answering here.
+    image: confluentinc/cp-enterprise-alertmanager:2.6.0
+    hostname: cp-enterprise-alertmanager
+    container_name: alertmanager
+    depends_on:
+      - c3-prometheus
+    volumes:
+      - ./vol/config:/mnt/config:z
+    ports:
+      - "9093:9093"
+    environment:
+      CONFIG_PATH: "/mnt/config"
+      # Quoted on purpose. Unquoted, YAML makes this a boolean and the
+      # value reaches the container as "False", which the image's own
+      # start script compares against a lower-case "false", never sets
+      # LOG_FILE, and exits on its `set -u`.
+      SHOULD_LOG_TO_FILE: "false"
+
+  control-center:
+    <<: *logging
+    # Confluent Control Center, next generation: the web console on
+    # localhost:9021. This is the one to open to see the messages - Topics,
+    # then a topic, then Messages, and the JSON the bridge produced is
+    # there. Charts come from Prometheus rather than from the broker
+    # directly, which is what "next-gen" changed.
+    image: confluentinc/cp-enterprise-control-center-next-gen:2.6.0
+    hostname: control-center
+    container_name: control-center
+    depends_on:
+      - kafka
+      - schema-registry
+      - c3-prometheus
+      - alertmanager
+    ports:
+      - "9021:9021"
+    volumes:
+      - ./vol/config:/mnt/config:z
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: 'kafka:29092'
+      CONTROL_CENTER_SCHEMA_REGISTRY_URL: "http://schema-registry:8081"
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
+      CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
+      CONFLUENT_METRICS_TOPIC_REPLICATION: 1
+      CONTROL_CENTER_PROMETHEUS_ENABLE: "true"
+      CONTROL_CENTER_PROMETHEUS_URL: http://c3-prometheus:9090
+      CONTROL_CENTER_PROMETHEUS_RULES_FILE: /mnt/config/trigger_rules-generated.yml
+      CONTROL_CENTER_ALERTMANAGER_URL: http://alertmanager:9093
+      CONTROL_CENTER_ALERTMANAGER_CONFIG_FILE: /mnt/config/alertmanager-generated.yml
+      PORT: 9021
+
+  iot-datagen:
+    <<: [*bento, *logging]
+    # Bento, a stream processor configured as a sensor simulator: it invents
+    # the readings and publishes them to saguin. See IoTDataGen.yaml.
+    container_name: bento-iot-datagen
+    command: ["-c", "IoTDataGen.yaml"]
+    environment:
+      MQTT_URLS: tcp://saguin:1883
+    depends_on:
+      # Only the broker. It used to wait for the bridge as well, because the
+      # 100 location messages were sent once and never again and a generator
+      # that started first published them into an empty room. They now go to
+      # a `latest` channel, which keeps the current value of every topic for
+      # whoever subscribes next - so the order these two start in stopped
+      # mattering.
+      saguin:
+        condition: service_healthy
+
+  mqtt2kafka:
+    <<: [*bento, *logging]
+    # The same Bento image, run as the bridge: subscribes to saguin, decodes
+    # each protobuf payload to JSON and produces it to Kafka. See
+    # MQTT2Kafka.yaml.
+    container_name: bento-mqtt2kafka
+    command: ["-c", "MQTT2Kafka.yaml"]
+    environment:
+      MQTT_URLS: tcp://saguin:1883
+      KAFKA_SEED_BROKERS: kafka:29092
+    depends_on:
+      saguin:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+      # **Before the first produce, or there is nothing to create.** Kafka
+      # auto-creates a topic on first write with the broker's defaults, and
+      # `water-location` would then be a delete-policy log for good - a
+      # topic's cleanup policy is not something the producer gets to state.
+      kafka-topics:
+        condition: service_completed_successfully
+    healthcheck:
+      # Bento answers /ready with 503 until every input and output has
+      # connected, and 200 once they have - so this is "subscribed to saguin
+      # and talking to Kafka".
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:4195/ready"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  # --- What was examples/monitoring, folded in ----------------------------
+  #
+  # These four used to be a stack of their own with a saguin of their own,
+  # and the reason they are here is not tidiness. That stack drove itself
+  # with traffic.py alone - a generator shaped to light up metrics, which is
+  # the weakest possible evidence that the metrics mean anything. The two
+  # Bento pipelines above are a load nobody tuned to look good on a
+  # dashboard, and it is the case the catalogue was designed for: a consumer
+  # whose position actually lags, provider bytes that actually grow.
+
+  prometheus:
+    <<: *logging
+    # The ordinary Prometheus, scraping saguin and both Bento pipelines.
+    # Not the Confluent one above, which Control Center owns.
+    image: docker.io/prom/prometheus:v3.6.0
+    container_name: bento-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      # Two hours is longer than any demonstration and short enough that
+      # nothing accumulates on the machine.
+      - --storage.tsdb.retention.time=2h
+      - --web.enable-lifecycle
+    ports:
+      # 9094 on the host. The ports to dodge are not only this file's:
+      # saguin's operations listener has 9090 and Confluent's Prometheus
+      # 9099 here, and the home-automation demo publishes 9091 for its own
+      # operations listener. This mapping was on 9091 and collided with it,
+      # which is why the two demos could not be brought up one after the
+      # other without a `docker compose down` in between.
+      - "9094:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro,z
+    depends_on:
+      - saguin
+
+  grafana:
+    <<: *logging
+    image: docker.io/grafana/grafana:12.2.0
+    container_name: bento-grafana
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    environment:
+      # Anonymous viewing, so the point of the demonstration - the
+      # dashboard - is one URL away rather than behind a login nobody chose
+      # a password for. The admin account still exists for poking at
+      # settings; README.md names it.
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      # Opening localhost:3000 lands on the dashboard rather than on an
+      # empty home page with a "create your first dashboard" button.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/saguin.json
+      # Nothing here is a real deployment and nothing should phone home.
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_NEWS_NEWS_FEED_ENABLED: "false"
+    volumes:
+      # The two provisioning directories this stack uses, rather than the
+      # whole of /etc/grafana/provisioning. Mounting the parent hides the
+      # empty `plugins` and `alerting` directories the image ships, and
+      # Grafana logs an error for each at every start - two errors on a
+      # healthy stack, which teaches a reader to scroll past errors.
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro,z
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro,z
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro,z
+
+  viewer:
+    <<: *logging
+    # **`ifnesi/saguin-viewer`, not a page written for this stack.** The
+    # MQTT half of the pipeline as a topic tree, a live feed of everything
+    # arriving, a publish form, a replay control and a dashboard of the
+    # numbers the broker keeps about itself. Dockerfile says why a viewer is
+    # built here rather than pulled: MQTT Explorer, which this stack used to
+    # ship, asks for MQTT 3.1.1 - refused outright when this stack was built,
+    # admitted today, and no more use either way, because a 3.1.1 client is
+    # handed no user properties and this stack's offsets and `schema`
+    # pointers all live there.
+    #
+    # **The readings decode here**, through saguin's own schema registry: the
+    # `schema` property on each record names a topic, the viewer point-reads
+    # it and reads the bytes with what it finds. The bytes stay on screen
+    # beside the decoded card. Control Center shows the decoded form on the
+    # Kafka side, one step downstream.
+    #
+    # It connects as a durable consumer of its own, which is what gives it a
+    # stored position for the replay control to move. That position is its
+    # own: replaying a channel here does not disturb the bridge feeding
+    # Kafka. It never subscribes to a queue, and cannot: the broker leaves a
+    # queue's records out of any filter that merely crosses one.
+    # **Built from the viewer's own Dockerfile in its own repository.** It is a
+    # client of any saguin and lives in `ifnesi/saguin-viewer`; this stack is one
+    # deployment that points it at a broker. Defined the other way round, running
+    # it against your own broker would mean building from an example's Dockerfile.
+    #
+    # **The default is a sibling checkout**, which is the layout a contributor
+    # working on both has - and the exact mirror of `SAGUIN_REPO`, which the
+    # viewer's own suite uses to find *this* repository. Export
+    # `SAGUIN_VIEWER_DIR` to build from a clone anywhere else.
+    #
+    # It builds rather than pulls because no image is published yet. When one is,
+    # this becomes `image: ghcr.io/ifnesi/saguin-viewer:<version>` and the clone
+    # stops being needed.
+    build:
+      context: ${SAGUIN_VIEWER_DIR:-../../../saguin-viewer}
+      dockerfile: web/Dockerfile
+    container_name: bento-viewer
+    ports:
+      - "4000:8080"
+    # Every setting in the viewer's own saguin-viewer.yaml is
+    # `${VAR:-default}`, so these override the handful this stack needs and
+    # the file supplies the rest.
+    environment:
+      # **0.0.0.0 here and only here.** The viewer defaults to loopback,
+      # which is right for an operator running it on their own machine and
+      # wrong inside a container - loopback there is the container, so the
+      # published port would reach nothing.
+      SAGUIN_VIEWER_LISTEN: "0.0.0.0:8080"
+      SAGUIN_MQTT_HOST: saguin
+      SAGUIN_MQTT_PORT: "1883"
+      SAGUIN_VIEWER_CLIENT_ID: bento-viewer
+      # **The operator credential rather than the scraper's, and the
+      # difference is the demonstration.** `prometheus` is narrowed to
+      # /metrics in operations.passwd, because a scraper's password sits in
+      # a monitoring configuration read by whoever runs monitoring. This
+      # viewer reads the catalogue *and* the routes that answer what the
+      # catalogue cannot - who is behind, what a queue holds, who may
+      # connect - so it needs the wider one, which is what having two is for.
+      SAGUIN_OPS_URL: "http://saguin:9090"
+      SAGUIN_OPS_USER: operator
+      SAGUIN_OPS_PASSWORD: operator
+    depends_on:
+      saguin:
+        condition: service_healthy
+    restart: unless-stopped
+
+  mosquitto:
+    <<: *logging
+    # **The upstream saguin's bridge reads from, and not the broker this
+    # example used to run on.** That one stood in for saguin because Bento
+    # could not speak MQTT 5; it is gone. This one is somebody else's estate
+    # - a broker that has never heard of a channel - which is the only
+    # honest way to show an inbound bridge. Published on 1884 because saguin
+    # has 1883.
+    image: docker.io/library/eclipse-mosquitto:2
+    container_name: bento-upstream
+    ports:
+      - "1884:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro,z
+
+  traffic:
+    <<: *logging
+    # The queue, the bridge's upstream and the deliberate mistakes - the
+    # three things the Bento pipelines are not. traffic.py says what each
+    # strand is for.
+    #
+    # Stop it with `docker compose stop traffic` to watch those rows settle
+    # while the Bento rows carry on, which is worth doing once: it is the
+    # difference between the two loads made visible.
+    build:
+      context: ../..
+      dockerfile: examples/bento-connectors/Dockerfile
+      target: traffic
+    container_name: bento-traffic
+    depends_on:
+      saguin:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  # Named rather than a bind mount: a bind would put a database owned by
+  # uid 10001 into the checkout, which is a file the person running this
+  # cannot delete without sudo.
+  saguin-data:

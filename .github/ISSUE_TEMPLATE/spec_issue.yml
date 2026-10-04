@@ -1,0 +1,48 @@
+name: Specification defect or ambiguity
+description: An RFC is unclear, contradictory, or wrong. The most valuable issue you can open right now.
+labels: ["spec"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        saguin specifies behaviour before implementing it, so a defect
+        found in an RFC is one that never reaches the code. This needs no
+        Go and no running server - just a careful reading.
+
+        **If two people could read a sentence and build different things,
+        that is a defect**, even when neither reading is wrong.
+  - type: input
+    id: section
+    attributes:
+      label: Which RFC and section
+      placeholder: RFC 0002, "Wildcards and the channel boundary"
+    validations:
+      required: true
+  - type: textarea
+    id: quote
+    attributes:
+      label: The text in question
+      description: Quote it, so we are looking at the same words.
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: |
+        For an ambiguity, give both readings and what each would build.
+        For a contradiction, quote the other document too. For something
+        simply wrong, say what is true instead.
+
+        If it contradicts the MQTT 5 specification, say so and cite the
+        section - MQTT wins, and that is a defect we fix immediately.
+    validations:
+      required: true
+  - type: textarea
+    id: consequence
+    attributes:
+      label: What goes wrong if this is not fixed
+      description: Optional, but it is what decides severity. The failures worth most attention are the ones that report success.
+    validations:
+      required: false

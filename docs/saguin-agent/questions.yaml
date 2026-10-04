@@ -1,0 +1,245 @@
+# The question set. `make -C docs/saguin-agent questions` runs it.
+#
+# **Chunking, the embedding model, the prompt and the retrieval depth are all
+# knobs somebody will turn**, and without a fixed set of questions with known
+# answers, turning them is guesswork - a change that reads better and answers
+# worse is indistinguishable from an improvement.
+#
+# Two kinds of entry:
+#   expect_citation  a document or section that must appear in the references,
+#                    or a list of them where the fact is stated in more than
+#                    one place and any one is a grounded citation
+#   expect_refusal   the agent must answer that the documentation does not say
+#   context          optional bounded capsule for testing a follow-up whose
+#                    words do not stand alone; questions are newest last
+#
+# The traps are the point. Every one of these is a question where a fluent
+# answer from general MQTT knowledge would be wrong about saguin.
+
+- question: How do I turn off certificate verification on a bridge?
+  expect_citation: "On a bridge, dialling out"
+  why: >
+    There is deliberately no way. Any other broker's answer is "set
+    insecure/skip-verify", which saguin does not have and will not add.
+
+- question: Does a memory provider survive a power cut?
+  expect_citation: "invariant 14"
+  why: >
+    No - memory durability is exactly the last successful snapshot. The
+    plausible wrong answer is "yes, it persists".
+
+- question: Can two workers get the same job?
+  expect_citation: "invariant 4"
+  why: >
+    No, and the reason is the subscription form. Shared subscriptions in
+    other brokers answer this differently.
+
+- question: What is the default for allow_anonymous?
+  expect_citation: "Who may connect"
+  why: >
+    It follows the password file, which no other broker does: absent file
+    means anonymous is allowed, a file means it is not.
+
+- question: What happens to unacknowledged queue work when the broker restarts?
+  expect_citation: ["invariant 15", "queue › Restart", "volatile half"]
+  why: >
+    Deliveries, Delivery IDs and deadlines are not restored; attempt counts
+    are. This is the question single-shot retrieval fails - the rule shares
+    almost no vocabulary with the question, so it takes a second search. The
+    fact is stated in invariant 15 and again in RFC 0003's section named
+    "Restart" and RFC 0004's "volatile half"; a citation to any of them is
+    grounded, so all three are accepted.
+
+- question: What licence is saguin under?
+  expect_citation: "LICENSE"
+  why: >
+    Apache 2.0. Retrieval used to miss this entirely because the licence was
+    one 11,000-character chunk whose vector meant nothing.
+
+- question: How do I configure per-client ACLs so a device can only publish to its own topic?
+  expect_citation: "What a client may do"
+  why: >
+    Roles do exactly this: an acl_file role of `filter: events/telemetry/%u/#` where
+    %u is the client's identity restricts each device to its own topic (RFC
+    0002, "Roles, and users matched by pattern"). This was a refusal trap
+    when saguin had no acl_file; acl_file and roles exist now, so a refusal
+    would be wrong - the answer is grounded in "What a client may do".
+
+- question: What is saguin's cluster rebalancing strategy?
+  expect_citation: "Non-goals"
+  why: >
+    saguin is single-node, and RFC 0001 says so under Non-goals - so the
+    grounded answer is "there is none, it does not cluster", citing that
+    section, rather than a refusal. A model that invents a rebalancing
+    strategy still fails: it cannot cite Non-goals for one.
+
+- question: How many bytes is the MQTT fixed header?
+  expect_refusal: true
+  why: >
+    True of MQTT, absent from saguin's documents. The refusal is what keeps
+    the tool honest about what it is quoting.
+
+- question: Show me an example of a queue configured with retry backoff.
+  expect_citation: "examples/saguin.yaml"
+  why: >
+    A fluent answer invents YAML that does not load - the backoff keys come
+    as a pair, and a shape without a base is refused at startup. The
+    grounded answer cites the annotated example, which is a configuration
+    the demo actually runs.
+
+- question: Is there a complete example configuration file I can start from?
+  expect_citation: "examples/saguin.yaml"
+  why: >
+    There is, and it is indexed so the agent can hand over the real one
+    rather than composing a plausible file from fragments.
+
+- question: How do I see the reply to a seek?
+  expect_citation: "Moving a consumer's position"
+  why: >
+    Set a Response Topic: the reply goes there, on the seeking session,
+    without a subscription. A client that stays connected - the Paho
+    snippet in the seek section - prints the offset it landed on. The trap
+    is that a client that exits at the PUBACK exits 0 on a refused seek, and a seek with no Response
+    Topic and no subscription to the reply topic shows nothing.
+
+- question: Can I connect with MQTT 3.1.1?
+  expect_citation: ["Which versions may connect", "Every reason code"]
+  why: >
+    Yes by default, and the grounded answer says what such a client gives
+    up - no reason codes, and no shared subscriptions, so it can publish
+    into a queue but not consume one. The fluent wrong answer is the one
+    this repository itself told for a while: that 3.1.1 is refused at
+    CONNECT. It is, but only where an operator has set
+    min_protocol_version to "5", and then it is answered 0x01 in the
+    older protocol's own vocabulary.
+
+- question: How do I configure mutual TLS from a bridge to its upstream?
+  expect_citation: "On a bridge, dialling out"
+  why: >
+    ca_file checks the far end, cert_file and key_file identify this one,
+    and the section shows the whole shape as one block. There is no
+    insecure or skip-verify to suggest.
+
+- question: How do I generate the certificate, key and CA files?
+  expect_citation: "Client certificates"
+  why: >
+    Three openssl commands per certificate, in RFC 0002, run against a
+    live broker. The parts a generic answer misses: the SAN is required
+    or modern clients refuse the listener, and a device certificate's CN
+    is the client's name.
+
+- question: How do I stop the broker writing a line for every client connect?
+  expect_citation: "How much the broker says"
+  why: >
+    Other brokers have a per-connection message switch, so a fluent answer invents a key
+    saguin does not have. saguin's answer is broker.log_level, because
+    volume is what a level is for. The half worth knowing: some lines
+    exist only at debug - a bridge writes one per failed connection
+    attempt there - so raising the floor hides them and lowering it is
+    how you see a link misbehaving.
+
+- question: A device connects asking for a keepalive of zero. What does saguin do?
+  expect_citation: "How long a client may go quiet"
+  why: >
+    Zero means "never disconnect me for being idle" in MQTT, and a
+    general answer stops there. saguin honours it unless
+    limits.max_keepalive is set, and then answers with the ceiling in the
+    CONNACK, which the client must use. Zero is the case the ceiling
+    exists for rather than an edge of it: it is the value that leaves a
+    session the broker cannot tell is dead until max_session_expiry.
+
+- question: Can the Unix socket admit anybody local while the TCP port demands a password?
+  expect_citation: "Who may connect: authentication and the password file"
+  why: >
+    Yes, and the trap is a broker whose keys are
+    broker-wide first, where this needs a per-listener switch. saguin has no
+    such flag - password_file and allow_anonymous are valid on any
+    listener and a listener's value wins. The subtle part a fluent answer
+    gets wrong: a listener naming its own password_file admits its own
+    users and nobody else, because it does not inherit the broker's
+    allow_anonymous. And not beside an acl_file: allow_anonymous: true there
+    is refused at startup, since an anonymous client's empty identity would
+    match a `*` user pattern ("What a client may do").
+
+- question: How long may a socket sit open without sending CONNECT, and does it use a connection slot?
+  expect_citation: "How long a socket may wait to send CONNECT"
+  why: >
+    It holds a max_connections slot immediately and the default timeout is
+    10 seconds. Keepalive does not apply before CONNECT, and `none` is not
+    accepted, so an answer borrowed from established MQTT sessions is wrong.
+
+- question: What is the largest CONNECT packet saguin accepts by default?
+  expect_citation: "The largest CONNECT before authentication"
+  why: >
+    The default is 100KiB, or max_message_size when that is smaller. The
+    whole packet is bounded before authentication and an MQTT 5 client is
+    answered 0x95; this is distinct from the general message-size limit.
+
+- question: If a fleet exceeds max_connect_rate, are its connections refused?
+  expect_citation: "How fast connections are accepted"
+  why: >
+    No. Each MQTT listener accepts at the configured rate with a burst of
+    twice that size, and excess connections wait in the operating system's
+    accept queue. A plausible rate-limiter answer would incorrectly describe
+    a refusal or disconnect.
+
+- question: My HTTPS dashboard is behind a proxy and saguin's WebSocket listener is plain HTTP. Why is same_origin refusing it?
+  expect_citation: "Which web pages may connect"
+  why: >
+    The schemes cannot match behind a TLS-terminating proxy. The documented
+    configuration turns same_origin off and explicitly lists the permitted
+    dashboard origins; disabling both checks would admit every page.
+
+- question: How do I enable QoS 2, and where do unfinished publishes wait?
+  expect_citation: ["Exactly-once publishes", "Exactly once, and where the unfinished ones wait"]
+  why: >
+    There is nothing to enable: every saguin offers QoS 2, and the optional
+    broker.qos2 block only sets max_inflight_per_client and expires_after,
+    absent meaning their defaults. There is no qos2 switch; taking QoS 2
+    away from a client is the acl_file's `broker: features` rule. A publish
+    between PUBREC and PUBREL is held in the store of the channel it is for,
+    or the broadcast log's, inside that provider's max_bytes. The fluent
+    wrong answer is a boolean to turn on.
+
+- question: A delayed Will is pending. Does a rejected reconnect with the same client id cancel it?
+  expect_citation: "The delay is saguin's, not the substrate's"
+  why: >
+    No. A refused CONNECT is not a connection and changes no Will or session
+    state. A generic same-client-id answer may cancel the Will without first
+    accounting for authentication.
+
+- question: And after the broker restarts?
+  context:
+    questions:
+      - What happens to queue work that a worker received but never acknowledged?
+    citations:
+      - "docs/rfcs/0003-delivery-semantics.md › Restart"
+  expect_citation: ["invariant 15", "queue › Restart", "volatile half"]
+  why: >
+    The current question contains no queue vocabulary. The prior user question
+    is what makes this a queue-restart question: live delivery state disappears
+    while the record and its attempt count remain.
+
+- question: What about SQLite?
+  context:
+    questions:
+      - Does a memory provider survive a power cut?
+    citations:
+      - "docs/rfcs/0004-storage.md › Two providers: memory and sqlite"
+  expect_citation: ["invariant 14", "Two providers: memory and sqlite", "WAL, and synchronous=NORMAL"]
+  why: >
+    SQLite survives a process crash whole, but a power cut may lose the latest
+    acknowledged commits under synchronous=NORMAL. Without the preceding
+    question, "What about SQLite?" has no specific property to retrieve.
+
+- question: Does that client get reason codes when something is refused?
+  context:
+    questions:
+      - Can an MQTT 3.1.1 client connect to saguin?
+    citations:
+      - "docs/rfcs/0002-channels-and-configuration.md › Which versions may connect"
+  expect_citation: ["Which versions may connect", "Every reason code"]
+  why: >
+    "That client" means the 3.1.1 client from the prior question. It has no MQTT
+    5 reason codes: SUBACK has only a granted QoS or 0x80, and an unreportable
+    publish refusal closes the connection.

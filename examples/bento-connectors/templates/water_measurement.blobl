@@ -1,0 +1,42 @@
+# water_measurement.blobl
+#
+# One water-quality device per invocation, round-robin over wq-001 .. wq-100.
+# No GPS here - stationary devices only send location once, at startup
+# (see water_location_startup.blobl).
+import "../lib/gauss.blobl"
+
+let idx       = counter(min: 0, max: 99)
+let device_id = "wq-%03d".format($idx + 1)
+
+let cached = cache_get(resource: "water_state", key: $device_id).catch(null)
+let prev   = if $cached != null { $cached.parse_json() } else { null }
+
+let base_ph        = if $prev != null { $prev.ph }                 else { 6.5 + (random_int(min: 0, max: 200).number() / 100) } # ~6.5-8.5
+let base_turbidity = if $prev != null { $prev.turbidity }          else { random_int(min: 1, max: 50).number() }                # NTU
+let base_minerals  = if $prev != null { $prev.dissolved_minerals } else { random_int(min: 100, max: 500).number() }             # ppm
+
+let new_ph        = $base_ph        + null.apply("gauss_delta")
+let new_turbidity = $base_turbidity + null.apply("gauss_delta")
+let new_minerals  = $base_minerals  + (null.apply("gauss_delta") * 100)  # wider unit scale than pH/turbidity
+
+root.device_id          = $device_id
+root.timestamp_ms       = timestamp_unix_milli()
+root.ph                 = ($new_ph * 100).round() / 100
+root.turbidity          = ($new_turbidity * 100).round() / 100
+root.dissolved_minerals = ($new_minerals * 100).round() / 100
+
+let save = cache_set(
+  resource: "water_state",
+  key: $device_id,
+  value: {
+    "ph": root.ph,
+    "turbidity": root.turbidity,
+    "dissolved_minerals": root.dissolved_minerals
+  }.format_json(no_indent: true)
+)
+
+meta msg_type   = "water_measurement"
+# Which schema deserializes this. The value is the whole topic, so the
+# consumer point-reads exactly this string and has nothing to guess.
+meta schema     = "schemas/iot/water_measurement/v1"
+meta mqtt_topic = "iot/water/measurement/" + $device_id

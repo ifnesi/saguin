@@ -1,0 +1,159 @@
+# What each client of the demo may do, once it is in.
+#
+# Rules go into a ROLE and clients are given roles BY PATTERN, because a
+# fleet of ten thousand devices that are all the same kind of thing needs
+# one rule rather than ten thousand copies of it - and every copy is a
+# chance to get one wrong.
+#
+# `%u` is the client's own identity: the password-file user name, or a
+# client certificate's name, which arrive in the same field. It is
+# substituted wherever a rule names a filter - `topic:` and `filter:` - and
+# never in a channel name, which is declared once in the configuration and
+# cannot vary by client.
+#
+# `saguin --acl examples/saguin.yaml device-7` prints what any one
+# client comes to, with the substitution already made.
+
+roles:
+  # Everything the guided tour does. A real deployment would not hand one
+  # role every verb on every channel; this one exists so the tour can drive
+  # all three channel types as a single client.
+  tour:
+    - channel: events
+      allow: [write, read, seek]
+    - channel: state
+      allow: [write, read, delete]
+    - channel: presence
+      allow: [write, read, delete]
+    - channel: jobs
+      allow: [write, consume]
+    - channel: jobs__dlq
+      allow: [write, read, seek]
+    # A topic rule governs broadcast - the topics no channel claims.
+    - topic: "#"
+      allow: [write, read]
+
+  # **The one rule kind that is not about topics.** `broker:` names a
+  # facility of the broker itself rather than a channel or a broadcast
+  # topic, and there is one of those: `sessions`, with one verb.
+  #
+  # `disconnect` hangs up a connected client - the client id goes in the
+  # payload of a publish to `$saguin/sessions/disconnect`, and the outcome
+  # comes back on the Response Topic.
+  #
+  # **It withdraws nothing on its own.** The whole cost of it is one
+  # reconnection, and what the device may do when it comes back is whatever
+  # these two files say then. Taking access away is: edit this file and the
+  # password file, signal the broker with SIGUSR1 to re-read them, and then
+  # hang the client up so it connects again and is refused. RFC 0002,
+  # "Withdrawing a device's access", has the four steps and what each one
+  # alone leaves behind.
+  #
+  # The other reason to reach for it has nothing to do with credentials: a
+  # queue lease goes back when the connection ends, so hanging up a stuck
+  # worker returns the jobs it was holding.
+  #
+  # It ends the connection and leaves the session alone, so the device comes
+  # back and resumes at its stored position.
+  #
+  # **Nothing written as a filter can reach it**, which is why it is a rule
+  # kind rather than a reserved topic: `topic: "#"` above grants the tour
+  # every broadcast topic and does not grant this.
+  on-call:
+    - broker: sessions
+      allow: [disconnect]
+
+  # **Taking a feature away.** Every client may keep a session, leave a
+  # Will, join a shared subscription, keep a retained value on a broadcast
+  # topic and publish at QoS 2, until a role denies it. Each name is the
+  # broker block that configures the feature. A denied client is answered as
+  # a broker without the feature would answer it: `qos2` is told Maximum
+  # QoS 1 at connect, `share` is told Shared Subscription Available 0,
+  # `persistent` gets a session that ends with the connection, and a Will or
+  # a retained broadcast value it may not have is refused. RFC 0002, "Taking
+  # a feature away", has the whole table.
+  #
+  # Nobody here carries it; give it to a fleet of constrained sensors.
+  constrained:
+    - broker: features
+      deny: [persistent, will, share, retained, qos2]
+
+  # One rule for any number of devices. A device may reach its own topics
+  # and nothing else, and it never appears in this file by name.
+  #
+  # A `topic:` rule governs broadcast - the topics no channel's filter
+  # claims - so this filter must not lie inside one, and startup refuses it
+  # if it does. `iot/+/health/+` is claimed by nothing, which is what makes
+  # it writable here.
+  device:
+    - topic: iot/+/health/%u
+      allow: [write, read]
+
+users:
+  # Nobody carries `on-call` in this file, and that is deliberate: hanging
+  # other clients up is not something the guided tour should be able to do
+  # by accident. Give it to an operator's own credential to use it.
+  #
+  # The tour's own user, which is in examples/clients.passwd.
+  #
+  # **The short form is a client entry**, and most of them are: a pattern
+  # and the roles it is given.
+  demo: [tour]
+
+  # Matched by pattern, so provisioning a device is a certificate and no
+  # edit here at all. device-7 authenticates with its certificate's Common
+  # Name and has no password anywhere.
+  # The longer form, for a pattern that also carries limits. One entry per
+  # pattern, roles and limits together - a separate block keyed by the same
+  # patterns would mean writing every device pattern twice, and a typo in
+  # the second one silently means no limit at all.
+  #
+  # **These replace the broker-wide limits.publish_rate and
+  # limits.publish_bytes, up or down.** That is the point of naming a
+  # client: a gateway that legitimately publishes faster than a sensor
+  # cannot be expressed by a bound that only ever tightens.
+  #
+  # `saguin --acl examples/saguin.yaml device-7` prints what any one client
+  # comes to, limits included.
+  "device-*":
+    roles: [device]
+    # Which devices may log in under this name. `%u` is the name itself, so
+    # this says "connect under the name on your certificate" - one line for
+    # a fleet of any size, and what makes the client id in a log line worth
+    # reading. Omit the key and any client id may use the credential.
+    #
+    # It matters most when several devices SHARE a credential: five
+    # passwords for a thousand sensors is a fair trade, and
+    # `client_ids: "north-*"` then keeps the northern password from being
+    # used by a southern device. Inside one credential it cannot help, and
+    # nothing can - devices sharing a secret are one principal.
+    client_ids: "%u"
+    limits:
+      # A sensor: a reading every few seconds, and small ones.
+      publish_rate: 20
+      publish_bytes: 8KiB
+
+  # And the exception, which is where the rule that settles them shows: both
+  # patterns match `device-7`, and the one that spells the id out most
+  # exactly supplies the WHOLE entry - its roles and its limits together.
+  # The same rule RFC 0002 uses to settle two channel filters claiming one
+  # topic. This one is looser than the fleet it sits in, which a bound that
+  # only tightened could not express.
+  #
+  # **So this entry is the complete statement about device-7**, and `device`
+  # is repeated here rather than inherited: the fleet entry above no longer
+  # applies to this client at all. That is what makes an exception
+  # expressible - a device that should have fewer roles than its fleet has
+  # no other spelling - and it is why an entry with no `roles:` is refused.
+  # `saguin --acl examples/saguin.yaml device-7` names the entry in force
+  # and the ones it shadows, which is the only place that can be seen.
+  "device-7":
+    roles: [device]
+    # Repeated rather than inherited, because the entry that applies is the
+    # whole statement about this client and the fleet entry above no longer
+    # reaches it. Leaving it out here would take the constraint off exactly
+    # the one device that was singled out.
+    client_ids: "%u"
+    limits:
+      publish_rate: 200
+      publish_bytes: 64KiB

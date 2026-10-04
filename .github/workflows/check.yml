@@ -1,0 +1,116 @@
+# The quick set and the Paho conformance suite, run on a machine that is
+# not the author's. The heavy half of `make check` (the race detector, the
+# timing checks, the benchmarks and the fuzzers, about 35 minutes) and the
+# two external suites, `make mqtt5test` and `make mqttconf`, are not run
+# here: the maintainer approves every pull request and runs all of them
+# locally before pushing or merging, so GitHub's job is the part a
+# different kernel and compiler can change, not a second run of the part a
+# different machine cannot.
+#
+# The command is `make ci` rather than a list of go invocations copied out
+# of it, so that the two cannot drift: whatever the target means locally is
+# what runs here.
+name: check
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: &docs
+      - "**.md"
+      - "docs/**"
+      - ".github/ISSUE_TEMPLATE/**"
+      - "LICENSE"
+  pull_request:
+    paths-ignore: *docs
+
+  # Run it by hand from the Actions tab. Useful when a run was skipped as
+  # documentation-only and you want the answer anyway.
+  workflow_dispatch:
+
+# A second push to the same branch cancels the first. The suite takes
+# minutes and the answer for a commit nobody is looking at any more is
+# worth nothing.
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The version comes from go.mod, so bumping the language version in
+      # one place moves CI with it.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # gofmt, vet, the build, and the whole suite without the race
+      # detector - one step, because one list. It includes cmd/saguin, so
+      # the heap-floor test measures GitHub's kernel rather than only the
+      # maintainer's. gofmt runs first, so a formatting error still fails in
+      # seconds rather than after the suite.
+      #
+      # **This is not the full check, and the name says so.** The
+      # local run before a push is the gate; a green tick here is a claim
+      # about the quick set and nothing more.
+      - name: make ci
+        run: make ci
+
+  # The Eclipse Paho MQTT 5 interoperability suite, which `make ci` does
+  # not run and deliberately does not claim to: it needs python3 and a clone
+  # from the network, and a local check that skipped when either was missing
+  # would be a green tick over work nobody did.
+  #
+  # **So it runs here instead, which is the step nobody skips.** A
+  # conformance result that lives only in a target somebody remembers to
+  # type gets run once, passes, and then describes a tree that has moved -
+  # and the README line naming it goes stale with it.
+  #
+  # The job is separate from `quick` rather than a step inside it so that a
+  # broker defect and a conformance regression are told apart on the Actions
+  # page without opening either.
+  #
+  # `make mqtt5test` and `make mqttconf` are not here: they need cargo and
+  # a compile, and they are run locally before every push.
+
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # The suite is pinned to a commit in the Makefile, so this measures
+      # one known version of it rather than whatever master says today.
+      # 24 of its 27 tests pass; the other three are named individually
+      # there, and any difference in either direction fails - a test that
+      # starts passing means the list is stale.
+      - name: make conformance
+        run: make conformance
+
+      # **The per-test logs, kept only when something failed.** The runner
+      # writes a broker log and a suite log per test and the job then threw
+      # them away, so a failure here was read from the one line the summary
+      # prints and re-run locally to learn anything - which loses the case
+      # that only fails on this machine under this load. A timing failure
+      # is decidable from the broker log of the test that failed and from
+      # nothing else.
+      - name: the conformance logs, on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            bin/conformance/*.log
+            bin/conformance/saguin.yaml
+          retention-days: 14
+          if-no-files-found: warn

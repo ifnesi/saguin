@@ -1,0 +1,59 @@
+# One file, as the item asks. `docker compose up` in this directory, with a
+# .env beside it copied from .env_example.
+#
+# The checkout is mounted read-only. This reads saguin's documents and
+# writes nothing to them - which is also what lets it index a clone, a
+# worktree, or a release tag without anybody worrying about what it might do
+# to them.
+
+services:
+  ai:
+    build: .
+    # Rebuilt whenever the image is older than the code. `docker compose up`
+    # reuses an existing image, so a pull that changes both this file and
+    # the application ships half of it: new compose passing empty values
+    # into an old app that crashed on them, which is exactly what happened
+    # on somebody's laptop.
+    pull_policy: build
+    ports:
+      - "${SAGUIN_AGENT_PORT:-5005}:5005"
+    environment:
+      # No defaults here. Every default lives in app/config.py, which treats
+      # an empty value as unset - because compose passes a variable through
+      # whether it was set or not, and a default written in both places is
+      # two defaults that drift. They did, within a day, and this file's
+      # copy was the one that won.
+      SAGUIN_LLM: "${SAGUIN_LLM:-}"
+      OLLAMA_ENDPOINT: "${OLLAMA_ENDPOINT:-}"
+      OLLAMA_MODEL: "${OLLAMA_MODEL:-}"
+      AWS_REGION: "${AWS_REGION:-}"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID:-}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY:-}"
+      BEDROCK_MODEL: "${BEDROCK_MODEL:-}"
+      AZURE_OPENAI_ENDPOINT: "${AZURE_OPENAI_ENDPOINT:-}"
+      AZURE_OPENAI_API_KEY: "${AZURE_OPENAI_API_KEY:-}"
+      AZURE_OPENAI_DEPLOYMENT: "${AZURE_OPENAI_DEPLOYMENT:-}"
+      GCP_PROJECT: "${GCP_PROJECT:-}"
+      GCP_REGION: "${GCP_REGION:-}"
+      GCP_MODEL: "${GCP_MODEL:-}"
+      # google.auth.default() reads this path from inside the container, so
+      # a credentials file only works once an operator also mounts it at the
+      # same path - the same way a bridge's TLS certificate is the
+      # operator's volume to add, not this file's to guess at.
+      GOOGLE_APPLICATION_CREDENTIALS: "${GOOGLE_APPLICATION_CREDENTIALS:-}"
+      SAGUIN_DOCS: "/docs"
+      SAGUIN_COMMIT: "${SAGUIN_COMMIT:-}"
+      SAGUIN_MAX_TURNS: "${SAGUIN_MAX_TURNS:-}"
+      SAGUIN_MIN_SCORE: "${SAGUIN_MIN_SCORE:-}"
+      SAGUIN_LLM_CONTEXT: "${SAGUIN_LLM_CONTEXT:-}"
+      SAGUIN_LLM_TIMEOUT: "${SAGUIN_LLM_TIMEOUT:-}"
+      SAGUIN_EXCERPTS: "${SAGUIN_EXCERPTS:-}"
+    volumes:
+      # The repository root, two levels up from this file.
+      - ../..:/docs:ro
+    extra_hosts:
+      # Docker on Linux does not provide host.docker.internal, and ollama
+      # usually runs on the machine rather than in a container. Without this
+      # the default configuration fails on exactly the platform saguin's
+      # operators use.
+      - "host.docker.internal:host-gateway"

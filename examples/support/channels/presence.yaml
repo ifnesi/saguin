@@ -1,0 +1,17 @@
+# The channels one domain owns, named by ../saguin.yaml with `!include`.
+#
+# An included file holds channel names and their settings, and nothing
+# else - no broker block, no listeners, no providers. It is the same thing
+# that would otherwise be written under `channels:` in the master file,
+# moved out so that the people who own these channels can review changes
+# to them without every other domain in the fleet appearing in the diff.
+#
+# It may not include a file of its own: the master names every file.
+
+# State that is regenerated the moment a device reconnects, so keeping it
+# across a shutdown would buy nothing. On the provider that says it keeps
+# nothing, which is the honest way to express that.
+presence:
+  type: latest
+  filter: iot/+/presence/+
+  storage: volatile

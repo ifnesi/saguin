@@ -1,0 +1,304 @@
+# The broker the two pipelines run against.
+#
+# It is not examples/saguin.yaml. That one is the annotated reference -
+# every key saguin accepts, behind TLS and a client certificate authority -
+# and this is the opposite: the fewest keys that give the three message
+# families somewhere durable to land, over plain TCP so that any MQTT 5
+# client can be pointed at it without a certificate.
+#
+# **The paths are absolute and inside the container**, which saguin requires
+# - a relative one would make the broker's data depend on the directory it
+# was started from. docker-compose.yml says where each of them is mounted.
+
+broker:
+  id: bento-connectors
+  log_level: info
+
+  mqtt:
+    listen:
+      tcp:
+        # Not loopback: the pipelines, and anything on the host reaching
+        # localhost:1883, are all on the other side of the container.
+        address: 0.0.0.0:1883
+
+  # What Prometheus scrapes, and what docker-compose.yml's health check asks.
+  # /health needs no credential - a supervisor deciding whether to restart a
+  # process cannot hold one - and /metrics does.
+  operations:
+    listen:
+      tcp:
+        address: 0.0.0.0:9090
+
+    # **This file is why the address above may be routable.** Without it
+    # saguin refuses to start bound anywhere but loopback, because /metrics
+    # serves channel names and volumes, the lowest stored consumer position
+    # on each, and every bridge's peer address. It is deliberately not
+    # the file MQTT clients are in.
+    password_file: /etc/saguin/operations.passwd
+
+    # Matched to prometheus.yml's scrape_interval. They do not have to agree
+    # - a scrape arriving early is answered from the previous catalogue
+    # rather than refused - but when they disagree the graphs show a value
+    # that is up to one interval old, which looks like a broker that has
+    # stopped moving rather than a scraper in a hurry.
+    min_scrape_interval: 60s
+
+  storage:
+    default: durable
+
+    # Stated per channel below instead. A default would reach the `latest`
+    # channel too, and the water stations publish their position once at
+    # startup and never again - an hour later every one of those values
+    # would have been removed, and a channel whose whole job is to hold the
+    # current value would be empty.
+    default_retention_period: none
+    default_retention_bytes: none
+
+    providers:
+      durable:
+        type: sqlite
+        file_path: /var/lib/saguin/saguin.db
+
+        # The generator publishes about twenty records a second between its
+        # two measurement strands, so an hour of history is a few megabytes.
+        # This is the ceiling on the file rather than a target.
+        max_bytes: 256MiB
+
+        # These give the two panels under Storage something to draw - and
+        # **what they draw here is the reading that says a count is set too
+        # high**, which is the point of showing it.
+        #
+        # The generator publishes from one MQTT connection, and RFC 0002 is
+        # explicit that connections are what fill a batch: its three strands
+        # share a socket, so nothing ever arrives together. Every
+        # transaction waits out the 5ms and commits one record. Measured on
+        # this stack: 123,794 records over 121,649 transactions, 1.02
+        # apiece, and not one batch in any of them closed on the count -
+        # saguin_storage_commits_total is entirely closed_by="interval"
+        # under a ceiling of 16.
+        #
+        # On a real broker that is the signal to lower
+        # publish_commit_max_records to the number of connections publishing
+        # at once, or to take both keys out. Here it is the traffic's shape
+        # rather than a mistake, and it is worth seeing what the fault looks
+        # like on a broker where nothing is wrong. At twenty records a
+        # second nobody feels the 5ms.
+        #
+        # `none` or 1ms-1s, and 2 to limits.max_connections; RFC 0002 says
+        # why each bound is where it is.
+        publish_commit_interval: 5ms
+        publish_commit_max_records: 16
+
+      # A second provider rather than one, because saguin_provider_bytes and
+      # saguin_provider_max_bytes carry a provider label and a single
+      # provider makes that panel look like a metric with no dimension.
+      volatile:
+        type: memory
+        snapshot_dir: none
+        max_bytes: 16MiB
+
+  # **Retained messages on broadcast topics.** Without this block a retained
+  # publish to a topic no channel claims is refused `0x9A` and the connection
+  # ends - which is right for a deployment that never asked for the storage,
+  # and wrong for a demonstration whose whole job is to show what saguin does.
+  #
+  # It is one store and it is not a channel: it claims no prefix and holds
+  # only topics no channel's filter claims. A `latest` channel is the other
+  # way to hold current state, for topics a channel does claim, and the two
+  # never overlap.
+  #
+  # On the memory provider, because these are a demonstration's own scratch
+  # values and none of them should outlive the stack. An hour, so a value
+  # somebody publishes while reading the page is still there when they come
+  # back to it, and a forgotten one does not sit there for ever.
+  retained:
+    storage: volatile
+    retention_period: 1h
+
+# **Five channels under one `iot/` hierarchy**, each claiming the topics its
+# `filter` matches. The layout is the one a standard MQTT fleet already has:
+#
+#   iot/<domain>/<kind>/<device>
+#
+#   iot/weather/measurement/trk-001   weather-measurement   append
+#   iot/water/measurement/wq-001      water-measurement     append
+#   iot/water/location/wq-001         water-location        latest
+#   iot/tasks/<job>/<id>              jobs                  queue
+#   iot/fleet/<metric>/<device>       fleet                 append (a copy)
+#
+# **A filter, not the name, decides where a record lives.** A channel name
+# is one topic level, so without a filter three message families wanting
+# three channel types would need three different first levels. With one,
+# `iot/water/` holds both an append channel and a latest one, picked apart
+# by the third level.
+#
+# **None of these filters ends in `#`**, so each matches exactly four levels.
+# `iot/weather/measurement/trk-001/raw` is five and belongs to nobody, which
+# is ordinary broadcast - delivered live, stored nowhere. Run
+# `saguin --route <config> <topic>` to see where any topic lands without
+# publishing to it.
+#
+# The channel *names* match the Kafka topics the bridge produces to, which
+# keeps the mapping in MQTT2Kafka.yaml readable. A name is identity - what a
+# snapshot file, a seek topic and a metric label are built from - and it is
+# not where the records are.
+channels:
+  # trk-001..trk-100, every 100ms, for ever. An append channel: a log with
+  # an offset per record, and one stored position per consumer - which is
+  # what lets the bridge be restarted without losing its place, and what the
+  # viewer's seek form moves.
+  weather-measurement:
+    type: append
+    filter: iot/weather/measurement/+
+    storage: durable
+    retention_period: 1h
+
+  # wq-001..wq-100, the same shape.
+  water-measurement:
+    type: append
+    filter: iot/water/measurement/+
+    storage: durable
+    retention_period: 1h
+
+  # The stationary stations' GPS positions. **Sent exactly once, at
+  # startup**, which is precisely the case a `latest` channel is for: the
+  # current value per topic is kept, and a subscriber connecting an hour
+  # later is served all 100 of them as current state rather than missing
+  # them for ever.
+  #
+  # Against a plain broker this was the demo's sharpest edge - the generator
+  # had to be held back until the bridge had subscribed, or those 100
+  # messages went into an empty room and the Kafka topic was never created
+  # at all. On a `latest` channel the ordering stops mattering.
+  water-location:
+    type: latest
+    filter: iot/water/location/+
+    storage: durable
+
+  # **The schema registry, and it is an ordinary `latest` channel.** Nothing
+  # in saguin knows the word "schema": this holds the current text of each
+  # protobuf definition, one per topic, and hands it to whoever subscribes
+  # next - which is what makes it a registry rather than three files somebody
+  # has to ship beside the consumer.
+  #
+  # Every reading carries a `schema` user property naming the topic here that
+  # defines it, so a consumer resolves the definition with one point read to
+  # `$saguin/kv/get` and caches it. RFC 0003 "Saying which schema
+  # deserializes a payload" is the convention; this is it configured.
+  #
+  # An `acl_file` confining each publisher to its own prefix writes
+  # `filter: "schemas/%u/#"` on a rule about this channel. The filter is
+  # compared against the whole topic, so the registry can be named anywhere
+  # in it - this one is the topics' first level because that reads well,
+  # not because it has to be. There is no acl_file in this demo.
+  schemas:
+    type: latest
+    filter: schemas/#
+    storage: durable
+
+
+  # --- What traffic.py drives, and the Bento pipelines cannot -------------
+  #
+  # The two pipelines above are real load through `append` and `latest`, and
+  # that is all they are: nothing in them is a queue, a bridge or a mistake.
+  # Three of the dashboard's seven rows would have no series at all without
+  # the two channels below, so traffic.py drives those instead. It publishes
+  # no measurements of its own - a generator shaped to light up a dashboard
+  # is the weakest evidence that the numbers mean anything, and the
+  # pipelines are a real load to draw them from.
+
+  # A queue. Short timeouts and few attempts on purpose: the seven queue
+  # metrics only move when work is delivered, returned, redelivered,
+  # dead-lettered and expired, and at a production visibility_timeout a
+  # demonstration would have to run for an hour to show one of them.
+  jobs:
+    type: queue
+    # The job kind is the third level and the job id the fourth, so
+    # `iot/tasks/settle/7dbec6ce` is one settle job. A worker needs none of
+    # it: the one subscription form is `$saguin/queue/jobs`, this
+    # channel's name.
+    filter: iot/tasks/+/+
+    storage: durable
+    max_bytes: 8MiB
+    visibility_timeout: 5s
+    job_expires_after: 5m
+    retry:
+      max_attempts: 3
+      backoff: linear
+      backoff_base: 1s
+
+    # **The dead-letter channel a queue derives is bounded here or nowhere.**
+    # `jobs__dlq` is not a name an operator may write under `channels:`, so
+    # these two keys are the only way to reach its retention - and without
+    # them it grows for as long as the broker runs. This demo fails jobs on
+    # purpose, so leaving it out means a stack left up overnight has a
+    # dead-letter channel with a night's worth of failures in it and nothing
+    # that ever removes one. Invariant 13: everything that accumulates is
+    # bounded.
+    #
+    # Fifteen minutes rather than a size, because a period is the half you
+    # can watch: `saguin_channel_retention_removed_total{channel="jobs__dlq"}`
+    # starts moving on the dashboard once the stack has been up that long,
+    # which is retention doing its job rather than a number that never
+    # changes.
+    dlq_retention_period: 15m
+
+  # What the bridge below writes into - and **the one channel here that
+  # throws records away**, so that saguin_channel_retention_removed_total has
+  # something to count and saguin_channel_floor_offset is something other
+  # than 1 on one row. Thirty seconds is absurd for a real deployment and is
+  # the point: a demonstration that waited a day to show retention would be a
+  # demonstration of waiting. The two measurement channels keep an hour, so
+  # the floor there stays where it started, which is what a healthy row looks
+  # like beside this one.
+  fleet:
+    type: append
+    # The bridge below writes `iot/fleet/<metric>/<device>`, built from what
+    # the peer published, and this filter is what claims it. The rule names
+    # no channel: the topic decides, as it does for every publisher, and
+    # `--check-config` prints where each rule lands.
+    filter: iot/fleet/+/+
+    # **The one channel on the memory provider, and the reason there are
+    # two.** `saguin_provider_bytes` carries a provider label, and until this
+    # moved here the volatile row was a flat zero - not because a memory
+    # provider without a snapshot_dir counts nothing, which is what a reader
+    # reasonably assumes, but because no channel used it. A provider with
+    # nothing in it is worse on a dashboard than one provider.
+    #
+    # Memory genuinely suits this one: it holds a copy of somebody else's
+    # records, arriving over a bridge, and keeps them for thirty seconds.
+    # Durability buys nothing for data that is a copy and is thrown away
+    # within the minute - and losing it on restart is what `snapshot_dir:
+    # none` says out loud.
+    storage: volatile
+    retention_period: 30s
+
+# An inbound bridge, so the five saguin_bridge_* metrics have a link to
+# describe.
+#
+# **The peer is a mosquitto, and it is not the broker this example
+# replaced.** The old one stood in for saguin because Bento could not speak
+# to saguin at all. This one is somebody else's estate - a broker that has
+# never heard of a channel, which is the only honest way to show a bridge.
+# Bridging saguin to saguin would demonstrate the wrong thing.
+bridges:
+  head-office:
+    peer: tcp://mosquitto:1883
+    client_id: saguin-connectors
+    topics:
+      # `filter` is what goes on the wire as saguin's SUBSCRIBE, against the
+      # *peer's* topic space - mosquitto's, which knows nothing about
+      # channels. `topic` is the whole local topic the record takes, with
+      # `$1` and `$2` standing for the filter's `+` levels in order: the
+      # device and the metric. So `fleet/device-08/telemetry/psi` at the peer
+      # becomes `iot/fleet/psi/device-08` here, which is what the `fleet`
+      # channel's own filter matches.
+      #
+      - filter: fleet/+/telemetry/+
+        topic: iot/fleet/$2/$1
+        # Which way this rule carries, and there is no default: an omitted
+        # key deciding whether this broker's records leave it is not
+        # something you could see in the file. `in` here, because the whole
+        # point of this bridge is to read somebody else's estate - nothing
+        # this broker holds is theirs to receive.
+        direction: in

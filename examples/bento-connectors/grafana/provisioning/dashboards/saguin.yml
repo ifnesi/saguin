@@ -1,0 +1,25 @@
+# Where Grafana finds the dashboard.
+#
+# **As code, not as an export.** A dashboard built in the interface and
+# exported is a JSON file nobody can review: it carries panel ids, grid
+# coordinates and interface state, and the next export reorders all of it,
+# so a change of one query becomes a diff of two thousand lines.
+# saguin.json is kept as text and reviewed as a diff instead - ordered,
+# with stable panel ids and a description on every panel. Edit the JSON.
+#
+# allowUiUpdates is false, so the interface will not save over it. Edits
+# made while poking at a panel are still possible - they are just not
+# written back to disk, which is what keeps the file the source of truth.
+apiVersion: 1
+
+providers:
+  - name: saguin
+    orgId: 1
+    folder: ""
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 10
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

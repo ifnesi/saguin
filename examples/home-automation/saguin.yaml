@@ -1,0 +1,258 @@
+# saguin for a home or edge Zigbee hub.
+#
+# What this demonstrates is not that saguin can carry zigbee2mqtt's messages -
+# any broker does that - but what three channels add to an installation that
+# had none: device state that survives a restart and reaches whoever connects
+# next, and a bridge event log that replays for a listener who was not there.
+#
+# Nothing in zigbee2mqtt is configured differently from a normal installation.
+# It is pointed at this broker with a user name and a password, and it works.
+#
+# TLS is written out below and commented out. This demo runs in plain text on
+# a private network because a self-signed certificate teaches the wrong habit,
+# and generating one here would mean telling every client to skip the check -
+# which looks secured and is not. The commented block is what to uncomment
+# when you have a certificate your estate issued.
+
+broker:
+  id: home-hub
+
+  log_level: info
+
+  mqtt:
+    listen:
+      tcp:
+        # The whole point of an edge hub is that devices on the LAN reach it,
+        # so this binds every interface rather than loopback.
+        address: 0.0.0.0:1883
+
+        # TLS, for when there is a real certificate. Both paths must be
+        # absolute: which certificate a listener serves must not depend on
+        # the directory the broker was started from.
+        #
+        # cert_file holds the CHAIN, not only the leaf. A certificate issued
+        # by an intermediate is `cat leaf.pem intermediate.pem > cert.pem`.
+        # Send only the leaf and this broker still starts, while every client
+        # that verifies properly reports "unable to verify the first
+        # certificate" - which is the failure that gets debugged by turning
+        # verification off.
+        #
+        # Move the address to 8883 with this, which is the usual TLS port,
+        # and change zigbee2mqtt's server to mqtts:// to match.
+        #
+        # tls:
+        #   cert_file: /etc/saguin/tls/broker.pem
+        #   key_file: /etc/saguin/tls/broker-key.pem
+        #
+        #   # A floor, not a pin: "1.2" (the default) or "1.3".
+        #   min_version: "1.2"
+        #
+        #   # Mutual TLS. Naming the authority that signed your CLIENTS'
+        #   # certificates makes saguin ask for one; absent, none is asked
+        #   # for or looked at. The certificate's name - its Common Name,
+        #   # or its first DNS name where it has none - then becomes the
+        #   # client's user name, so a device needs no password and the
+        #   # acl.yaml beside this file matches it the same way.
+        #   client_ca_file: /etc/saguin/tls/ca.pem
+
+    # Every client authenticates. There is no anonymous access: a hub on a
+    # home network is still reachable by everything else on that network,
+    # including whatever arrived with somebody's guest.
+    password_file: /etc/saguin/clients.passwd
+    allow_anonymous: false
+
+    # What each client may do once it is in. Without this file every
+    # authenticated client may use every channel, which is what a broker with
+    # no access control means.
+    acl_file: /etc/saguin/acl.yaml
+
+  # The operations listener: /health, /metrics and the catalogue the viewer
+  # reads. A second door on a second port, with its own credentials, because
+  # the thing that answers "is the broker up" should not be reachable by
+  # every device on the house network.
+  operations:
+    listen:
+      tcp:
+        address: 0.0.0.0:9090
+    password_file: /etc/saguin/operations.passwd
+
+  storage:
+    # sqlite rather than memory, because the thing being demonstrated is
+    # survival across a restart. A memory-backed channel survives a graceful
+    # shutdown and nothing else - which on a hub that loses power is no
+    # survival at all.
+    default: durable
+    default_retention_period: none
+    default_retention_bytes: none
+    providers:
+      - durable:
+          type: sqlite
+          file_path: /var/lib/saguin/home.db
+
+          # A ceiling on the whole store, and it is a different mechanism
+          # from the channels' retention rather than a second spelling of it.
+          # `retention_bytes` on a channel DELETES its oldest records to stay
+          # under; `max_bytes` here REFUSES the publish that would exceed,
+          # with `0x97`. You want both: retention keeps each channel's share
+          # in trim, and this is the last line of defence for the disk itself.
+          #
+          # Without it the viewer's storage panel says so, in as many words:
+          # "No bound configured - the provider grows until the disk does."
+          # On a hub with an SD card that is not a theoretical worry, and a
+          # channel added later without retention would find nothing to stop
+          # it.
+          #
+          # A gigabyte is generous for two sensors and a plug at a week's
+          # retention - the store sits in the hundreds of kilobytes here. It
+          # is sized for the device rather than for this demo.
+          max_bytes: 1GiB
+
+          # Turned down for a hub. A provider reads its channels on
+          # read-only connections beside its writer - two when this is
+          # absent - so a consumer's read never waits for a commit. Each is a
+          # page cache of memory, and three sensors and a plug publish too
+          # little for a read to wait long, so one is plenty here; 0 would
+          # put every read back on the write connection.
+          read_connections: 1
+
+  # Where a retained message on a broadcast topic is kept - one published with
+  # the RETAIN flag to a topic no channel claims. zigbee2mqtt retains its
+  # bridge state, so without this those would have nowhere to go.
+  retained:
+    storage: durable
+    retention_period: none
+
+channels:
+  # Every device reading, kept and replayable from a stored position.
+  #
+  # This is the channel that changes what an installation feels like. Plain
+  # MQTT gives a reading to whoever happens to be subscribed at that instant
+  # and then forgets it: close a dashboard for the weekend and the weekend
+  # did not happen. Here the readings are still on disk, and a client that
+  # was away resumes where it left off - so "what was the bedroom doing at
+  # four this morning" is a question the broker can answer.
+  #
+  # **`append` rather than `latest`**, so the readings accumulate rather than
+  # replace. Three devices every ten seconds is around twenty-six thousand
+  # records a day, which is why the retention below is not optional.
+  #
+  # **`start: tail` is what makes that affordable to read.** It governs only a
+  # subscriber that has NO stored position: a dashboard opening for the first
+  # time gets live readings rather than a week of history it did not ask for.
+  # A client that was here before and kept its session is unaffected - it
+  # resumes at its own position and is served everything it missed, which is
+  # the whole durability claim and is untouched by this. The history stays
+  # reachable: a seek to 0 is everything the channel holds, and a seek needs
+  # a durable session, so a reader that wants the tail by default and history
+  # on demand simply keeps its session.
+  #
+  # `floor`, the default, is right for a channel of events nobody may miss.
+  # This is a channel of readings, where the newest is what a dashboard wants
+  # and the rest is there when it asks.
+  #
+  # `zigbee2mqtt/+` is one level, so it claims `zigbee2mqtt/my-sensor` and
+  # does NOT claim `zigbee2mqtt/my-sensor/set`, which stays ordinary MQTT.
+  - devices:
+      type: append
+      filter: zigbee2mqtt/+
+      storage: durable
+      start: tail
+      retention_period: 7d
+      retention_bytes: 256MiB
+
+    # The bridge's own current state: `bridge/state`, `bridge/info`,
+    # `bridge/devices`, `bridge/definitions`. Same argument as above - a
+    # dashboard that reconnects knows what the bridge is without waiting for
+    # it to say so again.
+    #
+    # Three levels exactly, so `bridge/request/permit_join` is not claimed and
+    # remains broadcast, which is what a command should be.
+    bridge_state:
+      type: latest
+      filter: zigbee2mqtt/bridge/+
+      storage: durable
+
+    # Joins, leaves and interviews, replayable from a stored position.
+    #
+    # Both this filter and `zigbee2mqtt/bridge/+` above match
+    # `zigbee2mqtt/bridge/event`. This one holds it, because a spelled-out
+    # level beats a `+` at the level where two filters first differ - the rule
+    # is in the configuration rather than in the broker, so it reads off these
+    # two lines and never changes.
+    #
+    # A week, the same as every append channel here: long enough to answer
+    # "when did that sensor drop off", bounded so a hub's disk is not an open
+    # question. One figure across all three is one thing for an operator to
+    # change rather than three to keep in step.
+    bridge_events:
+      type: append
+      filter: zigbee2mqtt/bridge/event
+      storage: durable
+      retention_period: 7d
+      # Small, because announcements are small and rare next to readings or
+      # log lines - but bounded, so that every append channel here has two
+      # bounds rather than one. A channel held only by age is a channel whose
+      # size depends on how busy the week was.
+      retention_bytes: 16MiB
+
+    # The bridge's log, kept and replayable.
+    #
+    # This is the append channel that actually fills in this demo, because
+    # `bridge/event` records joins and leaves and a network with an emulated
+    # radio has neither. It is not a stand-in: "what was the hub saying at
+    # four this morning" is the question a home user has after something went
+    # wrong overnight, and plain MQTT answers it only for whoever happened to
+    # be subscribed at the time.
+    #
+    # Four levels? No - three, and spelled out at the last one, so it holds
+    # `bridge/logging` against the `bridge/+` above by the same precedence
+    # rule as `bridge/event`.
+    #
+    # A week, and bounded by size as well: a log is the one thing here that
+    # grows whether or not anything is happening.
+    bridge_log:
+      type: append
+      filter: zigbee2mqtt/bridge/logging
+      storage: durable
+      retention_period: 7d
+      retention_bytes: 64MiB
+
+    # ------------------------------------------------------------------
+    # The second gateway. Everything below is rtl_433's, and none of it
+    # is zigbee2mqtt's business: two gateways, one broker, separate
+    # credentials and separate channels.
+    # ------------------------------------------------------------------
+
+    # Every 433MHz reading, kept and replayable, for the same reason the
+    # Zigbee `devices` channel is: a reading handed to whoever happened to
+    # be subscribed and then forgotten cannot answer "how cold did the
+    # garden get last night", which is the question these sensors exist
+    # for.
+    #
+    # rtl_433 publishes one topic per field, so a single transmission
+    # arrives as several records: temperature_C, humidity, battery_ok and
+    # the rest, each under
+    # `rtl433/devices/<model>/<channel>/<id>/<field>`. Six levels, so six
+    # `+` would be wrong: the filter names the four that vary.
+    #
+    # `start: tail` for the same reason as the Zigbee side. A dashboard
+    # opening for the first time wants the current readings, not a week of
+    # them, and a client that kept its session still resumes where it was.
+    rf_readings:
+      type: append
+      filter: rtl433/devices/+/+/+/+
+      storage: durable
+      start: tail
+      retention_period: 7d
+      retention_bytes: 128MiB
+
+    # Whether the radio gateway is up, as its own current value.
+    #
+    # **This is a retained Will**: rtl_433 connects with a Will on this
+    # topic marked retained. This channel is where it lands, and a client
+    # the acl_file denied `retained` would still be admitted here, because
+    # the denial covers broadcast topics only.
+    rf_gateway:
+      type: latest
+      filter: rtl433/availability
+      storage: durable

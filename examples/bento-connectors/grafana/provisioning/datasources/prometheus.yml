@@ -1,0 +1,19 @@
+# The datasource, provisioned rather than clicked.
+#
+# A datasource added through the interface lives in Grafana's own database,
+# which this stack throws away on `docker compose down`. Provisioned, it is
+# part of the demonstration and comes back every time.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: saguin-prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      # Matches the scrape interval, so Grafana's "auto" step does not ask
+      # for a resolution the data does not have.
+      timeInterval: 15s

@@ -1,0 +1,124 @@
+# IoTDataGen.yaml
+#
+# Run from this directory, because the paths below resolve from Bento's
+# working directory rather than from this file's location:
+#   bento -c IoTDataGen.yaml
+#
+# Or bring up the whole demo - saguin, Kafka and both connectors - with
+#   docker compose up
+#
+# Three independent generators, each round-robining its own 100-device pool
+# one message at a time, merged by the broker input:
+#   1. weather_measurement      - trucks,  every 100ms, forever
+#   2. water_measurement        - water quality sensors, every 100ms, forever
+#   3. water_location_startup   - fires exactly 100 times at boot, then stops
+#
+# Each publishes to a topic whose first level is a saguin channel:
+# weather-measurement and water-measurement are `append` channels, and
+# water-location is `latest`. saguin.yaml says what each one is for.
+
+input:
+  broker:
+    inputs:
+      - generate:
+          interval: 100ms
+          count: 0   # 0 = run indefinitely
+          mapping: 'from "./templates/weather_measurement.blobl"'
+
+      - generate:
+          interval: 100ms
+          count: 0
+          mapping: 'from "./templates/water_measurement.blobl"'
+
+      - generate:
+          interval: ""   # as fast as downstream allows - just needs to drain 100 messages once
+          count: 100
+          mapping: 'from "./templates/water_location_startup.blobl"'
+
+      # The three protobuf definitions, published once at boot to the
+      # `schemas` channel so that a consumer can resolve the `schema`
+      # property every reading carries. Derived from schema/iot.proto, not
+      # written out again - see the template.
+      - generate:
+          interval: ""
+          count: 3
+          mapping: 'from "./templates/schema_registry_startup.blobl"'
+
+pipeline:
+  processors:
+    # Route to the matching protobuf schema based on which template produced
+    # the message (set via `meta msg_type = ...` in each .blobl file above).
+    - switch:
+        - check: 'metadata("msg_type") == "weather_measurement"'
+          processors:
+            - protobuf:
+                operator: from_json
+                message: iot.WeatherMeasurement
+                import_paths: [ "./schema" ]
+                use_proto_names: true   # match the snake_case fields we emit from Bloblang
+
+        - check: 'metadata("msg_type") == "water_measurement"'
+          processors:
+            - protobuf:
+                operator: from_json
+                message: iot.WaterMeasurement
+                import_paths: [ "./schema" ]
+                use_proto_names: true
+
+        - check: 'metadata("msg_type") == "water_location"'
+          processors:
+            - protobuf:
+                operator: from_json
+                message: iot.WaterLocation
+                import_paths: [ "./schema" ]
+                use_proto_names: true
+
+cache_resources:
+  - label: weather_state
+    memory:
+      default_ttl: 300s   # generous vs. the ~10s full round-robin cycle (100 devices x 100ms)
+  - label: water_state
+    memory:
+      default_ttl: 300s
+
+output:
+  # `mqtt_v5`, not `mqtt`. Bento's older `mqtt` output speaks 3.1.1, which
+  # saguin accepts, so this is not about being let in. It is about what
+  # 3.1.1 cannot carry: no user properties means no `msg_type` and no
+  # `schema` pointer, and those two are the whole of what every consumer
+  # downstream reads. The component comes from a fork until
+  # warpstreamlabs/bento#991 merges; Dockerfile says which commit and why.
+  mqtt_v5:
+    # Where the broker is. The default suits a Bento running on your own
+    # machine; docker-compose.yml sets MQTT_URLS to reach the saguin
+    # container instead.
+    urls: [ "${MQTT_URLS:tcp://localhost:1883}" ]
+    client_id: "bento_iot_simulator"
+    topic: '${! metadata("mqtt_topic") }'
+
+    # QoS 1 and not QoS 0, because the topics belong to durable channels.
+    # A channel that cannot keep a record answers the publish `0x83`, and
+    # at QoS 0 there is no acknowledgement to carry it - the record is
+    # dropped and the generator is never told. The broker logs every refusal
+    # whatever the QoS, but a producer that cannot see its own failures is
+    # the wrong thing to demonstrate.
+    qos: 1
+
+    # A publisher, not a consumer: it has no position to keep, so it wants a
+    # fresh session every time rather than one the broker holds open for it.
+    clean_start: true
+
+    # **Every metadata field becomes an MQTT 5 user property**, which is the
+    # part 3.1.1 cannot do at all - so `msg_type`, set by each template,
+    # travels beside the payload instead of having to be inferred from the
+    # topic at the far end. MQTT2Kafka.yaml reads it as ordinary metadata.
+    #
+    # **`exclude_prefixes` is set here because nothing sets it for you.**
+    # It defaults to empty in the pinned Bento - the review on #991 asked
+    # for the `mqtt_` default to go, on the grounds that a component should
+    # not decide which of your metadata is uninteresting - so this line is
+    # load-bearing rather than a restatement. `mqtt_topic` here is plumbing
+    # naming where the message is going, not something to tell the broker
+    # twice.
+    metadata:
+      exclude_prefixes: [ "mqtt_" ]

@@ -1,0 +1,24 @@
+# gauss.blobl
+#
+# Reusable helper mapping: yields one independent noise sample per invocation,
+# drawn from a Gaussian (mean 0) via a Box-Muller transform, then hard-clamped
+# to the range [-0.01, +0.01] as requested.
+#
+# Usage from another mapping file:
+#   import "../lib/gauss.blobl"
+#   let delta = null.apply("gauss_delta")
+#
+# Call it once per field you want to perturb - each call re-executes this
+# body and therefore draws fresh, independent randomness.
+map gauss_delta {
+  let u1 = (random_int(min: 1, max: 999999) + 0).number() / 1000000
+  let u2 = (random_int(min: 1, max: 999999) + 0).number() / 1000000
+
+  # Standard normal sample, mean 0, standard deviation 1.
+  let z = (-2 * $u1.log()).pow(0.5) * (2 * pi() * $u2).cos()
+
+  # Scale so ~99.7% of draws already land inside +/-0.01 (3 sigma),
+  # then hard-clamp the rest so it's a strict guarantee, not just likely.
+  let scaled = $z * 0.0033
+  root = [[$scaled, 0.01].min(), -0.01].max()
+}

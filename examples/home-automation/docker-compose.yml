@@ -1,0 +1,218 @@
+# A home Zigbee hub, with no Zigbee hardware.
+#
+#   viewer      http://localhost:4001   the topic tree, a live feed, a replay
+#                                       control, and saguin's own numbers
+#
+#   saguin      MQTT 5, authenticated             localhost:1883
+#               operations listener, /metrics     localhost:9091
+#   zigbee2mqtt the real thing, unmodified        talks to both below
+#   coordinator the emulated radio                zigbee2mqtt's serial port
+#
+# Nothing publishes to saguin but zigbee2mqtt. Device readings begin as ZCL
+# reports from the coordinator emulator, cross the radio socket, and
+# zigbee2mqtt decodes, names and publishes them.
+#
+# Ports 1883 and 9091 rather than 9090, so this stack can run beside the
+# bento-connectors one without either wondering why the other's broker is
+# answering its tests.
+#
+# The `z` on each bind mount relabels the mounted file for SELinux. Needed on
+# Fedora, RHEL and their relatives, ignored everywhere else.
+
+# Every container's log is bounded, because Docker's default is not: json-file
+# with no options grows until the disk does.
+x-logging: &logging
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  # The emulated radio. First, because zigbee2mqtt exits if its adapter is not
+  # there when it starts.
+  coordinator:
+    <<: *logging
+    build:
+      context: ../..
+      dockerfile: examples/home-automation/Dockerfile
+      target: coordinator
+    container_name: zb-coordinator
+    command:
+      - "-listen"
+      - "0.0.0.0:8888"
+      # Every request answered, not only the unanswered ones. This demo is
+      # about a protocol nobody can see, so the log is half of what it shows.
+      - "-verbose"
+      # These three must match zigbee2mqtt's `advanced:` block. On a mismatch
+      # zigbee2mqtt decides the coordinator belongs to another network and
+      # tries to commission a new one.
+      - "-pan-id"
+      - "6754"
+      - "-ext-pan-id"
+      - "dddddddddddddddd"
+      - "-network-key"
+      - "01030507090b0d0f00020406080a0c0d"
+      - "-channel"
+      - "11"
+    restart: unless-stopped
+
+  saguin:
+    <<: *logging
+    build:
+      context: ../..
+      dockerfile: examples/home-automation/Dockerfile
+      target: broker
+    container_name: zb-saguin
+    ports:
+      - "1883:1883"
+      - "9091:9090"
+    volumes:
+      - ./saguin.yaml:/etc/saguin/saguin.yaml:ro,z
+      - ./acl.yaml:/etc/saguin/acl.yaml:ro,z
+      - ./clients.passwd:/etc/saguin/clients.passwd:ro,z
+      - ./operations.passwd:/etc/saguin/operations.passwd:ro,z
+      - saguin-data:/var/lib/saguin
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9090/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  zigbee2mqtt:
+    <<: *logging
+    image: koenkk/zigbee2mqtt:2.14.1
+    container_name: zb-zigbee2mqtt
+    depends_on:
+      saguin:
+        condition: service_healthy
+      coordinator:
+        condition: service_started
+    volumes:
+      # A named volume rather than a bind mount, because zigbee2mqtt REWRITES
+      # its configuration as it runs and would edit the file in this
+      # repository. entrypoint.sh below seeds it on first start.
+      - z2m-data:/app/data
+      - ./zigbee2mqtt.yaml:/seed/configuration.yaml:ro,z
+      # Three devices zigbee2mqtt already knows, so it does not interview them
+      # at startup. That is the normal state of a hub that has been running -
+      # seed/README-seed.md says why, and what still comes over the radio.
+      # JSON Lines, and named so: `.db` is in .gitignore because that rule is
+      # about sqlite databases, and this is a checked-in fixture.
+      - ./seed/devices.jsonl:/seed/devices.jsonl:ro,z
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ ! -f /app/data/configuration.yaml ]; then
+          cp /seed/configuration.yaml /app/data/configuration.yaml
+          cp /seed/devices.jsonl /app/data/database.db
+        fi
+        exec docker-entrypoint.sh /sbin/tini -- node index.js
+    restart: unless-stopped
+
+
+  # The second emulated radio: an rtl_tcp server where an SDR dongle would
+  # be. Three 433MHz sensors, modulated into samples, on the air.
+  transmitter:
+    <<: *logging
+    build:
+      context: ../..
+      dockerfile: examples/home-automation/Dockerfile
+      target: transmitter
+    container_name: zb-transmitter
+    command:
+      - "-listen"
+      - "0.0.0.0:1234"
+      # A round of all three every half minute. Slow enough to read in the
+      # viewer, often enough that the demo does something while watched.
+      - "-report"
+      - "30s"
+    restart: unless-stopped
+
+  # The second gateway: rtl_433, the stock image, unmodified. It tunes the
+  # emulated dongle, demodulates what it hears, decodes it, and publishes to
+  # saguin under its own credential.
+  #
+  # **Its own user, its own role, its own channels.** Nothing it can do
+  # touches the Zigbee half, which is the claim this second gateway exists
+  # to make: one broker, two unrelated integrations, neither able to write
+  # the other's topics.
+  rtl433:
+    <<: *logging
+    image: hertzg/rtl_433:latest
+    container_name: zb-rtl433
+    depends_on:
+      saguin:
+        condition: service_healthy
+      transmitter:
+        condition: service_started
+    command:
+      # The radio, which is a network address rather than a device file, for
+      # the same reason zigbee2mqtt's is. Point this at a real rtl_tcp
+      # server and nothing else in this stack changes.
+      - "-d"
+      - "rtl_tcp://transmitter:1234"
+      - "-s"
+      - "250k"
+      - "-f"
+      - "433.92M"
+      # `base=rtl433` replaces the default topic root, which is the word
+      # rtl_433 followed by the container's hostname - a name that changes
+      # when the container is recreated and would leave the old branch
+      # behind in the tree.
+      - "-F"
+      - "mqtt://saguin:1883,user=rtl433-hub-1,pass=rf-password-change-me,base=rtl433"
+      # The decoded readings on stdout as well, so `docker compose logs
+      # rtl433` shows what came off the air.
+      - "-F"
+      - "json"
+    restart: unless-stopped
+
+  # ifnesi/saguin-viewer, pointed at this stack rather than a page written
+  # for it. The topic tree with the devices under it, a live feed as readings
+  # arrive, the replay control that demonstrates the append channel really
+  # does hand back what a listener missed, and a publish form for sending a
+  # command back to a device.
+  viewer:
+    <<: *logging
+    # **Built from the viewer's own Dockerfile in its own repository.** It is a
+    # client of any saguin and lives in `ifnesi/saguin-viewer`; this stack is one
+    # deployment that points it at a broker. Defined the other way round, running
+    # it against your own broker would mean building from an example's Dockerfile.
+    #
+    # **The default is a sibling checkout**, which is the layout a contributor
+    # working on both has - and the exact mirror of `SAGUIN_REPO`, which the
+    # viewer's own suite uses to find *this* repository. Export
+    # `SAGUIN_VIEWER_DIR` to build from a clone anywhere else.
+    #
+    # It builds rather than pulls because no image is published yet. When one is,
+    # this becomes `image: ghcr.io/ifnesi/saguin-viewer:<version>` and the clone
+    # stops being needed.
+    build:
+      context: ${SAGUIN_VIEWER_DIR:-../../../saguin-viewer}
+      dockerfile: web/Dockerfile
+    container_name: zb-viewer
+    ports:
+      - "4001:8080"
+    environment:
+      SAGUIN_VIEWER_LISTEN: "0.0.0.0:8080"
+      SAGUIN_MQTT_HOST: saguin
+      SAGUIN_MQTT_PORT: "1883"
+      SAGUIN_MQTT_PROTOCOL: "5"
+      # The acl.yaml binds `viewer-*` to a client id equal to the user name,
+      # so these two must stay the same string.
+      SAGUIN_MQTT_USER: viewer-hub
+      SAGUIN_MQTT_PASSWORD: viewer-password-change-me
+      SAGUIN_VIEWER_CLIENT_ID: viewer-hub
+      SAGUIN_OPS_URL: "http://saguin:9090"
+      SAGUIN_OPS_USER: operator
+      SAGUIN_OPS_PASSWORD: operator-password-change-me
+    depends_on:
+      saguin:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  saguin-data:
+  z2m-data:

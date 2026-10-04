@@ -1,0 +1,17 @@
+# The operator's own credentials and endpoints. .env_example is committed;
+# .env is theirs and never leaves their machine.
+.env
+
+# The embedding model. It is downloaded when the image is built, so it lives
+# in an image layer and not here - but a cache volume mounted into this
+# directory, or a stray run outside a container, would drop ~130MB into the
+# working tree, and a model in git is a model somebody has to clone.
+models/
+.cache/
+*.onnx
+
+# Python, in case anything is ever run outside the container.
+__pycache__/
+*.py[cod]
+.venv/
+venv/
