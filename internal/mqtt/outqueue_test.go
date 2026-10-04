@@ -391,16 +391,38 @@ func TestAnAwaySessionKeepsNothingItsConnectionHeld(t *testing.T) {
 func TestAQoS1DeliveryQueuedAsItsConnectionEndedIsSentAgainOnResume(t *testing.T) {
 	s := newServer()
 	defer s.Close()
-	const n = 20
-	away := stalledAway(t, s, "resumer", n)
+	// Make every PUBLISH reach the connection rather than being counted as
+	// sent while it waits in the client's write buffer.
+	s.Options.ClientNetWriteBufferSize = 1
+	const n, pass = 20, 3
+	var held *holdsPublishWrites
+	away := stalledAwayOn(t, s, "resumer", n, func(c net.Conn) net.Conn {
+		held = newHoldsPublishWrites(c, pass)
+		return held
+	}, func() {
+		select {
+		case <-held.blocked:
+		case <-time.After(5 * time.Second):
+			t.Fatal("the connection did not hold the PUBLISH after the allowed prefix")
+		}
+	})
 	unsent, never := map[uint16]bool{}, 0
+	written, unwritten := []uint16{}, []uint16{}
 	for _, pk := range away.State.Inflight.GetAll(false) {
 		if unsent[pk.PacketID] = pk.Expiry < 0; unsent[pk.PacketID] {
 			never++
+			unwritten = append(unwritten, pk.PacketID)
+		} else {
+			written = append(written, pk.PacketID)
 		}
 	}
-	t.Logf("away with %d in flight, %d never written", len(unsent), never)
+	t.Logf("away with %d in flight: written %v, never written %v; connection passed %d PUBLISH writes and held the next",
+		len(unsent), written, unwritten, pass)
+	require.Equal(t, int32(pass+1), held.writes.Load(),
+		"the controlled connection did not pass %d PUBLISH writes and hold the next", pass)
 	require.Positive(t, never, "nothing was left unwritten, so this proves nothing")
+	require.Equal(t, n-pass-1, never,
+		"the controlled connection did not leave the expected tail unwritten: written %v, never written %v", written, unwritten)
 
 	r, w := net.Pipe()
 	defer w.Close()
@@ -520,6 +542,40 @@ func (c *takesPublishes) Write(b []byte) (int, error) {
 		return len(b), nil
 	}
 	return c.Conn.Write(b)
+}
+
+// holdsPublishWrites accepts a fixed prefix of PUBLISH writes, then holds the
+// next until the connection is closed. It models a socket whose send buffer
+// filled at a known point, independent of the machine and scheduler.
+type holdsPublishWrites struct {
+	net.Conn
+	pass      int32
+	writes    atomic.Int32
+	blocked   chan struct{}
+	closed    chan struct{}
+	blockOnce sync.Once
+	closeOnce sync.Once
+}
+
+func newHoldsPublishWrites(c net.Conn, pass int32) *holdsPublishWrites {
+	return &holdsPublishWrites{Conn: c, pass: pass, blocked: make(chan struct{}), closed: make(chan struct{})}
+}
+
+func (c *holdsPublishWrites) Write(b []byte) (int, error) {
+	if len(b) == 0 || b[0]>>4 != packets.Publish {
+		return c.Conn.Write(b)
+	}
+	if c.writes.Add(1) <= c.pass {
+		return len(b), nil
+	}
+	c.blockOnce.Do(func() { close(c.blocked) })
+	<-c.closed
+	return 0, net.ErrClosed
+}
+
+func (c *holdsPublishWrites) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return c.Conn.Close()
 }
 
 // stalledAway connects id with a session that outlives its connection, has
