@@ -57,12 +57,12 @@ services:
       - "11"
     restart: unless-stopped
 
+  # The published image. It has no shell and no wget, so there is no health
+  # check inside it: the clients below start once it has started, and each
+  # reconnects until it answers.
   saguin:
     <<: *logging
-    build:
-      context: ../..
-      dockerfile: examples/home-automation/Dockerfile
-      target: broker
+    image: ghcr.io/ifnesi/saguin:0.1.0-rc.1
     container_name: zb-saguin
     ports:
       - "1883:1883"
@@ -73,11 +73,6 @@ services:
       - ./clients.passwd:/etc/saguin/clients.passwd:ro,z
       - ./operations.passwd:/etc/saguin/operations.passwd:ro,z
       - saguin-data:/var/lib/saguin
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9090/health"]
-      interval: 3s
-      timeout: 5s
-      retries: 10
     restart: unless-stopped
 
   zigbee2mqtt:
@@ -86,7 +81,7 @@ services:
     container_name: zb-zigbee2mqtt
     depends_on:
       saguin:
-        condition: service_healthy
+        condition: service_started
       coordinator:
         condition: service_started
     volumes:
@@ -144,7 +139,7 @@ services:
     container_name: zb-rtl433
     depends_on:
       saguin:
-        condition: service_healthy
+        condition: service_started
       transmitter:
         condition: service_started
     command:
@@ -176,22 +171,9 @@ services:
   # command back to a device.
   viewer:
     <<: *logging
-    # **Built from the viewer's own Dockerfile in its own repository.** It is a
-    # client of any saguin and lives in `ifnesi/saguin-viewer`; this stack is one
-    # deployment that points it at a broker. Defined the other way round, running
-    # it against your own broker would mean building from an example's Dockerfile.
-    #
-    # **The default is a sibling checkout**, which is the layout a contributor
-    # working on both has - and the exact mirror of `SAGUIN_REPO`, which the
-    # viewer's own suite uses to find *this* repository. Export
-    # `SAGUIN_VIEWER_DIR` to build from a clone anywhere else.
-    #
-    # It builds rather than pulls because no image is published yet. When one is,
-    # this becomes `image: ghcr.io/ifnesi/saguin-viewer:<version>` and the clone
-    # stops being needed.
-    build:
-      context: ${SAGUIN_VIEWER_DIR:-../../../saguin-viewer}
-      dockerfile: web/Dockerfile
+    # The viewer's published image: it lives in `ifnesi/saguin-viewer`, and
+    # this stack is one deployment that points it at a broker.
+    image: ghcr.io/ifnesi/saguin-viewer:latest
     container_name: zb-viewer
     ports:
       - "4001:8080"
@@ -210,7 +192,7 @@ services:
       SAGUIN_OPS_PASSWORD: operator-password-change-me
     depends_on:
       saguin:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
 volumes:

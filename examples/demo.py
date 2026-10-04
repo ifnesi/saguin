@@ -2,17 +2,20 @@
 """The saguin demo. Every channel type, and the delivery paths a first
 reading needs, driven by a stock MQTT 5 client:
 
-    python3 -m venv .venv
-    . .venv/bin/activate
-    pip install -r examples/requirements.txt
-    python examples/demo.py
+    cd examples
+    docker compose run --rm --build demo           # the concise tour
+    docker compose run --rm --build demo --full    # every section
+    docker compose down                            # stops the viewer afterwards
+
+and watch it in the viewer at http://localhost:8080 while it runs.
 
 It stops at every step and waits for ENTER, so that it can be read at the
 speed of whoever is reading it and presented to a room at the speed of
 whoever is talking.
 
-The prerequisites are Go, to build the broker, and the shared examples Python
-environment. The
+Docker is the only prerequisite that way. Run directly, it needs Go to
+build the broker and the shared examples Python environment, which
+examples/README.md sets up. The
 certificates are checked in under examples/support/certs, so openssl is needed
 only to make new ones - examples/README.md has the commands.
 

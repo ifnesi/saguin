@@ -1,54 +1,26 @@
-# Three images for this demo: the broker, and the two emulated radios that
-# stand where hardware would.
+# The two emulated radios that stand where hardware would.
 #
-# The viewer is NOT built here, and is not in this repository. It is
-# ifnesi/saguin-viewer, which has a Dockerfile of its own, and
-# docker-compose.yml builds from a checkout of it - beside saguin by default, or
-# wherever SAGUIN_VIEWER_DIR points.
+# The broker and the viewer are NOT built here: docker-compose.yml runs their
+# published images, ghcr.io/ifnesi/saguin and ghcr.io/ifnesi/saguin-viewer.
 
 # --------------------------------------------------------------------------
 FROM docker.io/library/golang:1.25-alpine AS build
 
 # git, so the build can stamp what it built. Go reads the revision out of the
-# checkout only when git is on PATH; without it saguin reports its version as
-# "dev", and a demo whose version panel says "dev" answers the wrong question.
+# checkout only when git is on PATH.
 RUN apk add --no-cache git
 
 WORKDIR /src
 
-# The module graph first, so editing saguin does not re-download everything.
+# The module graph first, so editing the radios does not re-download everything.
 COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
 
-# CGO off, which costs nothing: saguin's SQLite provider is modernc.org/sqlite,
-# Go rather than a C binding. What it buys is a static binary on a base image
-# with no libc of its own.
-RUN CGO_ENABLED=0 go build -trimpath -o /out/saguin ./cmd/saguin \
- && CGO_ENABLED=0 go build -trimpath -o /out/coordinator ./examples/home-automation/coordinator \
+# CGO off: a static binary on a base image with no libc of its own.
+RUN CGO_ENABLED=0 go build -trimpath -o /out/coordinator ./examples/home-automation/coordinator \
  && CGO_ENABLED=0 go build -trimpath -o /out/transmitter ./examples/home-automation/transmitter
-
-
-# --------------------------------------------------------------------------
-FROM docker.io/library/alpine:3.22 AS broker
-
-# A shell on purpose: this is a thing to poke at. `docker compose exec saguin
-# sh` and read the database, or run `saguin --passwd` against the credential
-# file. Distroless would be right for a release and wrong here.
-RUN adduser -D -H -u 10001 saguin \
- && mkdir -p /var/lib/saguin \
- && chown saguin:saguin /var/lib/saguin
-
-COPY --from=build /out/saguin /usr/local/bin/saguin
-
-USER saguin
-WORKDIR /var/lib/saguin
-
-EXPOSE 1883 9090
-
-ENTRYPOINT ["/usr/local/bin/saguin"]
-CMD ["--config", "/etc/saguin/saguin.yaml"]
 
 
 # --------------------------------------------------------------------------

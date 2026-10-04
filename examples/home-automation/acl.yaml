@@ -74,8 +74,10 @@ roles:
   # every other client then believes. That separation is the reason this file
   # exists rather than one role called `everything`.
   home-viewer:
+    # `seek` on every append channel: the viewer's replay control is a seek,
+    # and without it the page asks and is never answered.
     - channel: devices
-      allow: [read]
+      allow: [read, seek]
     - channel: bridge_state
       allow: [read]
 

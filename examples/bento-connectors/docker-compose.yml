@@ -28,10 +28,10 @@
 # Grafana draws from. Merging them would mean rewriting a generated config
 # that the Confluent image owns.
 #
-# **Four images are built here rather than pulled**, and each says why on its
-# service. saguin has no published container image; no published Bento image
-# has the `mqtt_v5` input and output this stack needs; and the traffic
-# generator and the viewer are written for this demonstration.
+# **saguin and the viewer are their published images; two are built here**,
+# and each says why on its service: no published Bento image has the
+# `mqtt_v5` input and output this stack needs, and the traffic generator is
+# written for this demonstration.
 #
 # The `z` on each bind mount relabels the mounted files for SELinux. It is
 # needed on Fedora, RHEL and their relatives, and ignored everywhere else.
@@ -59,8 +59,8 @@ x-logging: &logging
 x-bento: &bento
   image: bento-connectors-bento:local
   build:
-    # The repository root, because one Dockerfile builds all three images
-    # here and two of them compile out of this checkout.
+    # The repository root, because one Dockerfile builds both images here
+    # and the traffic generator is copied out of this checkout.
     context: ../..
     dockerfile: examples/bento-connectors/Dockerfile
     target: bento
@@ -73,13 +73,10 @@ name: bento-connectors
 services:
   saguin:
     <<: *logging
-    # The broker. **Built from this checkout, not pulled**: saguin has no
-    # published container image yet, and Dockerfile says why an example
-    # builds one rather than reaching a broker on the host.
-    build:
-      context: ../..
-      dockerfile: examples/bento-connectors/Dockerfile
-      target: broker
+    # The broker, as its published image. It has no shell and no wget, so
+    # there is no health check inside it: the clients below start once it
+    # has started, and each reconnects until it answers.
+    image: ghcr.io/ifnesi/saguin:0.1.0-rc.1
     container_name: bento-saguin
     depends_on:
       # The bridge's upstream. Not a health condition: saguin retries the
@@ -96,8 +93,8 @@ services:
       - ./saguin.yaml:/etc/saguin/saguin.yaml:ro,z
       - ./operations.passwd:/etc/saguin/operations.passwd:ro,z
       # **The database, on a volume rather than in the container's own
-      # layer.** Without this, recreating the container - which is what
-      # `up --build` does after any edit to the broker - takes every record,
+      # layer.** Without this, recreating the container - which is what a
+      # new image or `--force-recreate` does - takes every record,
       # every stored consumer position and every `latest` value with it. The
       # water stations publish their coordinates exactly once, at startup,
       # so a broker that came back empty served none of them ever again
@@ -107,15 +104,6 @@ services:
       # `docker compose down -v` is the reset. `down` on its own now keeps
       # the data, which is the point of it.
       - saguin-data:/var/lib/saguin
-    healthcheck:
-      # saguin's operations listener, on loopback inside the container -
-      # saguin.yaml says why it is there. /health answers 200 once the
-      # broker is accepting connections, which is what the two pipelines
-      # below wait for.
-      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:9090/health"]
-      interval: 3s
-      timeout: 5s
-      retries: 10
 
   kafka:
     <<: *logging
@@ -343,7 +331,7 @@ services:
       # whoever subscribes next - so the order these two start in stopped
       # mattering.
       saguin:
-        condition: service_healthy
+        condition: service_started
 
   mqtt2kafka:
     <<: [*bento, *logging]
@@ -357,7 +345,7 @@ services:
       KAFKA_SEED_BROKERS: kafka:29092
     depends_on:
       saguin:
-        condition: service_healthy
+        condition: service_started
       kafka:
         condition: service_healthy
       # **Before the first produce, or there is nothing to create.** Kafka
@@ -449,9 +437,8 @@ services:
     # **`ifnesi/saguin-viewer`, not a page written for this stack.** The
     # MQTT half of the pipeline as a topic tree, a live feed of everything
     # arriving, a publish form, a replay control and a dashboard of the
-    # numbers the broker keeps about itself. Dockerfile says why a viewer is
-    # built here rather than pulled: MQTT Explorer, which this stack used to
-    # ship, asks for MQTT 3.1.1 - refused outright when this stack was built,
+    # numbers the broker keeps about itself. Not MQTT Explorer, which this
+    # stack used to ship: it asks for MQTT 3.1.1 - refused outright when this stack was built,
     # admitted today, and no more use either way, because a 3.1.1 client is
     # handed no user properties and this stack's offsets and `schema`
     # pointers all live there.
@@ -467,22 +454,10 @@ services:
     # own: replaying a channel here does not disturb the bridge feeding
     # Kafka. It never subscribes to a queue, and cannot: the broker leaves a
     # queue's records out of any filter that merely crosses one.
-    # **Built from the viewer's own Dockerfile in its own repository.** It is a
-    # client of any saguin and lives in `ifnesi/saguin-viewer`; this stack is one
-    # deployment that points it at a broker. Defined the other way round, running
-    # it against your own broker would mean building from an example's Dockerfile.
     #
-    # **The default is a sibling checkout**, which is the layout a contributor
-    # working on both has - and the exact mirror of `SAGUIN_REPO`, which the
-    # viewer's own suite uses to find *this* repository. Export
-    # `SAGUIN_VIEWER_DIR` to build from a clone anywhere else.
-    #
-    # It builds rather than pulls because no image is published yet. When one is,
-    # this becomes `image: ghcr.io/ifnesi/saguin-viewer:<version>` and the clone
-    # stops being needed.
-    build:
-      context: ${SAGUIN_VIEWER_DIR:-../../../saguin-viewer}
-      dockerfile: web/Dockerfile
+    # The viewer's published image: it lives in `ifnesi/saguin-viewer`, and
+    # this stack is one deployment that points it at a broker.
+    image: ghcr.io/ifnesi/saguin-viewer:latest
     container_name: bento-viewer
     ports:
       - "4000:8080"
@@ -510,7 +485,7 @@ services:
       SAGUIN_OPS_PASSWORD: operator
     depends_on:
       saguin:
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
   mosquitto:
@@ -544,7 +519,7 @@ services:
     container_name: bento-traffic
     depends_on:
       saguin:
-        condition: service_healthy
+        condition: service_started
       mosquitto:
         condition: service_started
     restart: unless-stopped

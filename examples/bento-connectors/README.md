@@ -252,7 +252,7 @@ live" is that mechanism.
 
 ```
 docker-compose.yml           the containers
-Dockerfile                   three images built here: Bento, saguin, traffic
+Dockerfile                   two images built here: Bento, traffic
                              the viewer is built from saguin-viewer, its
                              own repository, from its own
 saguin.yaml                  the broker: six channels, a bridge, two providers
@@ -290,6 +290,7 @@ the working directory for you.
 ## Run it
 
 ```sh
+cd examples/bento-connectors
 docker compose up --build
 ```
 
@@ -300,17 +301,11 @@ on top of each other, the second does not refuse cleanly: its broker starts
 *healthy with no published ports*, and `localhost:1883` keeps answering -
 from the first demo's broker. Everything then measures the wrong one.
 
-**The first run builds four images and takes a few minutes**: Sagüin and
-the traffic generator from this checkout, the viewer from a checkout of
-[saguin-viewer](https://github.com/ifnesi/saguin-viewer), and Bento from its
-`main`. None has a published image to pull. After that they are cached.
-
-**The viewer needs that second checkout**, because it is not in this
-repository: clone it beside saguin, which is where `docker-compose.yml` looks,
-or export `SAGUIN_VIEWER_DIR` pointing at it anywhere else. `smoke.sh` says so
-by name rather than letting docker fail about a context path.
-
-    git clone https://github.com/ifnesi/saguin-viewer.git ../../../saguin-viewer
+**Sagüin and [the viewer](https://github.com/ifnesi/saguin-viewer) are their
+published images**, `ghcr.io/ifnesi/saguin` and `ghcr.io/ifnesi/saguin-viewer`.
+**The first run builds two and takes a few minutes**: the traffic generator
+from this checkout, and Bento from its `main`, which has no published image
+with `mqtt_v5`. After that they are cached.
 
 ### Is it actually doing anything?
 
@@ -344,22 +339,20 @@ depth, and the dead-lettered records openable there with the
 
 It leaves the stack up, because a failure is a thing to look at.
 
-**`--build`, and not as a formality.** Sagüin's binary is baked into an
-image built from this checkout, while `saguin.yaml` is mounted from the
-working tree - so plain `docker compose up` after a `git pull`, or after
-editing the broker, runs yesterday's binary against today's configuration.
-A configuration key the old binary has never heard of is a hard startup
-error, so `saguin` never becomes healthy, and the four containers that wait
-on it - `iot-datagen`, `mqtt2kafka`, `viewer` and `traffic` - sit in
-`Waiting` for ever. **The symptom is four containers that never start and
-the cause is a line in a fifth's log**, so if that happens:
+**The broker is a published image and `saguin.yaml` is mounted from this
+checkout**, so the two can disagree: a configuration key newer than the image
+is a hard startup error. `saguin` then restarts in a loop and the four
+containers that connect to it - `iot-datagen`, `mqtt2kafka`, `viewer` and
+`traffic` - keep retrying. **The symptom is four containers with nothing to
+show and the cause is a line in a fifth's log**, so if that happens:
 
 ```sh
 docker compose logs saguin | head
 ```
 
 The mismatch names itself there - `field filter not found`, or whichever
-key it is - and `docker compose up --build` is the fix.
+key it is - and the fix is the image version that matches this checkout, in
+`docker-compose.yml`.
 
 The containers come up in dependency order. Four of them are the
 pipeline, and the rest exist to let you look at it:
@@ -480,7 +473,7 @@ That asymmetry is the demonstration rather than an oversight. Recreate the
 broker on its own and watch what comes back:
 
 ```sh
-docker compose up -d --build --force-recreate saguin
+docker compose up -d --force-recreate saguin
 ```
 
 | | before | after |
@@ -1155,8 +1148,8 @@ That is fine for a stack that binds to localhost on your own machine and
 wrong for anything else: demo credentials, public; change them before exposing a broker. For your own:
 
 ```sh
-docker compose exec saguin saguin --passwd add   /tmp/ops.passwd alice
-docker compose exec saguin saguin --passwd scope /tmp/ops.passwd alice /metrics
+docker compose exec saguin saguin --passwd add   /var/lib/saguin/ops.passwd alice
+docker compose exec saguin saguin --passwd scope /var/lib/saguin/ops.passwd alice /metrics
 ```
 
 **In a browser, these prompt for a credential: `operator` / `operator`.**
@@ -1221,7 +1214,7 @@ topic would land before anything is sent to it.
 Verified against **Bento `main` at `7fae30cae`, 1.21.2 plus the merged `mqtt_v5`**,
 **Confluent Platform 8.3.0**, **Control Center next-gen 2.6.0**,
 **Prometheus 3.6.0**, **Grafana 12.2.0**, **mosquitto 2**, **React 18.3.1**
-with **htm 3.1.1**, and Sagüin built from this checkout. Every command on
+with **htm 3.1.1**, and Sagüin's image `0.1.0-rc.1`. Every command on
 this page was run against the stack this file describes, and the output
 quoted is what came back. The compose file was executed with
 `docker compose` 2.40.3 on Docker 29.1.3; it uses nothing outside ordinary

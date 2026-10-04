@@ -327,9 +327,12 @@ echo "$route" | grep -qi 'no channel\|broadcast' \
 # Last, because it takes the radio gateway down and back up.
 $COMPOSE kill rtl433 >/dev/null 2>&1
 state=""
+# A pause between reads: each one returns the stored value at once, so
+# without it every attempt can land before the change it is waiting for.
 for _ in $(seq 1 8); do
   state=$(sub 'rtl433/availability' | awk '{print $2}')
   [ "$state" = "offline" ] && break
+  sleep 1
 done
 [ "$state" = "offline" ] \
   && ok "a gateway killed without a DISCONNECT is marked offline by its Will" \
@@ -344,6 +347,7 @@ state=""
 for _ in $(seq 1 10); do
   state=$(sub 'rtl433/availability' | awk '{print $2}')
   [ "$state" = "online" ] && break
+  sleep 1
 done
 [ "$state" = "online" ] \
   && ok "and online again when the gateway comes back" \

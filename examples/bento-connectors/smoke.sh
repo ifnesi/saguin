@@ -33,25 +33,6 @@
 set -uo pipefail
 cd "$(dirname "$0")"
 
-# **The viewer is built from its own repository, so say so before docker does.**
-# It moved to ifnesi/saguin-viewer, and this stack builds it from a checkout: the
-# default is a sibling of saguin, and SAGUIN_VIEWER_DIR points anywhere else.
-# Without this, a missing or mistyped checkout surfaces as a docker build error
-# about a context path, which reads as a broken demo rather than as a clone that
-# is not where this expected.
-#
-# The resolved path is echoed rather than the default, so a wrong
-# SAGUIN_VIEWER_DIR fails naming the path it actually tried.
-viewer_dir="${SAGUIN_VIEWER_DIR:-../../../saguin-viewer}"
-if [ ! -f "$viewer_dir/web/Dockerfile" ]; then
-  printf 'the viewer is built from its own repository and this is not it:\n' >&2
-  printf '  %s\n' "$(cd "$(dirname "$viewer_dir")" 2>/dev/null && pwd || echo "$viewer_dir")/$(basename "$viewer_dir")" >&2
-  printf 'clone it beside saguin:\n' >&2
-  printf '  git clone https://github.com/ifnesi/saguin-viewer.git %s\n' "$viewer_dir" >&2
-  printf 'or point SAGUIN_VIEWER_DIR at a clone elsewhere.\n' >&2
-  exit 1
-fi
-
 fails=0
 checks=0
 say()  { printf '  %-58s %s\n' "$1" "$2"; }

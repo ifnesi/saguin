@@ -1,0 +1,19 @@
+# The viewer beside the guided tour, mounted over the image's own
+# configuration by docker-compose.yml. It names no dashboards, so the page is
+# the topics, the live feed and replay; the channel list comes from the
+# operations listener on 127.0.0.1:9090, which the viewer reads by default.
+#
+# It shares the tour container's network, so 127.0.0.1 is the tour's broker:
+# the password door on 1884, as the tour's own `demo` user.
+
+listen:
+  tcp:
+    address: 0.0.0.0:8080
+
+broker:
+  mqtt:
+    host: 127.0.0.1
+    port: 1884
+    username: demo
+    password: hunter2
+    client_id: tour-viewer

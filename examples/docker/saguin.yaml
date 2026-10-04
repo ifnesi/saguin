@@ -1,0 +1,54 @@
+# The broker for docker-compose.yml beside it. Mounted at /etc/saguin/saguin.yaml.
+#
+# MQTT on 0.0.0.0:1883 admits every client: it is for trying Sagüin, not
+# for a network you do not trust. Give it a password_file before that
+# (RFC 0002 "Who may connect").
+
+broker:
+  id: saguin
+  mqtt:
+    listen:
+      tcp:
+        # 0.0.0.0, because loopback inside a container is the container.
+        address: 0.0.0.0:1883
+  storage:
+    default: local
+    default_retention_period: 3d
+    default_retention_bytes: none
+    providers:
+      local:
+        type: sqlite
+        # The image's data volume.
+        file_path: /var/lib/saguin/saguin.db
+  # The viewer reads this listener over the compose network. A listener on
+  # an address that is not loopback must authenticate somebody (RFC 0002
+  # "The operations listener"): the passwd service writes the viewer's
+  # password here, and docker-compose.yml does not publish port 9090.
+  operations:
+    listen:
+      tcp:
+        address: 0.0.0.0:9090
+    password_file: /var/lib/saguin/operators.passwd
+
+# The README quick start's channels, so its examples run against this broker.
+channels:
+  events:
+    type: append
+    filter: iot/+/devices/telemetry/#
+    storage: local
+    retention_period: 7d
+
+  state:
+    type: latest
+    filter: iot/+/devices/state
+    storage: local
+    retention_period: 30d
+
+  jobs:
+    type: queue
+    storage: local
+    filter: iot/+/work/+
+    visibility_timeout: 30s
+    retry:
+      max_attempts: 5
+    dlq_retention_period: 30d

@@ -1,0 +1,27 @@
+# The guided tour, demo.py, with nothing installed but Docker. From this
+# directory:
+#
+#   docker compose run --rm --build demo           # the short tour, ENTER to step
+#   docker compose run --rm --build demo --full    # every section
+#   docker compose down                            # stops the viewer afterwards
+#
+# `run` rather than `up`: the tour waits for ENTER, so it needs your terminal.
+#
+# Watch it in the viewer at http://localhost:8080 - topics, the live feed and
+# replay. The tour's broker listens on loopback inside the tour's container,
+# so the tour joins the viewer's network and both see the same 127.0.0.1.
+services:
+  demo:
+    build:
+      context: ..
+      dockerfile: examples/demo.Dockerfile
+    stdin_open: true
+    tty: true
+    network_mode: "service:viewer"
+
+  viewer:
+    image: ghcr.io/ifnesi/saguin-viewer:latest
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./saguin-viewer.yaml:/viewer/saguin-viewer.yaml:ro,z

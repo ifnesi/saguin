@@ -1,0 +1,48 @@
+# Sagüin and its viewer. Choose the viewer's password once, then start:
+#
+#   echo "VIEWER_PASSWORD=<choose one>" > .env
+#   docker compose up -d
+#
+# Compose reads .env for every command, so restart, logs and down need
+# nothing more.
+#
+# MQTT on localhost:1883, the viewer on http://localhost:8080. The viewer
+# image is amd64 only until its next release.
+
+services:
+  # Writes the viewer's password into the broker's data volume, then exits.
+  # Run on every start: adding a user that exists changes its password.
+  passwd:
+    image: ghcr.io/ifnesi/saguin:0.1.0-rc.1
+    command: ["--passwd", "add", "/var/lib/saguin/operators.passwd",
+              "viewer", "${VIEWER_PASSWORD:?set VIEWER_PASSWORD}"]
+    volumes:
+      - saguin-data:/var/lib/saguin
+
+  saguin:
+    image: ghcr.io/ifnesi/saguin:0.1.0-rc.1
+    ports:
+      - "1883:1883"   # MQTT. Port 9090 is not published: only the viewer reads it.
+    volumes:
+      - ./saguin.yaml:/etc/saguin/saguin.yaml:ro
+      - saguin-data:/var/lib/saguin
+    depends_on:
+      passwd:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  viewer:
+    image: ghcr.io/ifnesi/saguin-viewer:latest
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      SAGUIN_VIEWER_LISTEN: 0.0.0.0:8080
+      SAGUIN_MQTT_HOST: saguin
+      SAGUIN_OPS_URL: http://saguin:9090
+      SAGUIN_OPS_USER: viewer
+      SAGUIN_OPS_PASSWORD: ${VIEWER_PASSWORD:?set VIEWER_PASSWORD}
+    depends_on: [saguin]
+    restart: unless-stopped
+
+volumes:
+  saguin-data:

@@ -332,7 +332,8 @@ broker:
 
   # The one HTTP listener an operator reads (RFC 0005). No default: absent
   # means no listener is opened, because a port nobody configured is a port
-  # nobody asked to have open.
+  # nobody asked to have open. The tour opens it on loopback, which needs no
+  # password_file, for the viewer docker-compose.yml runs beside it.
   #
   #   GET /health   no credential. Would restarting this process help? 200
   #                 while the broker is answering, 503 when it is wedged.
@@ -366,8 +367,8 @@ broker:
   # <user>`, and it is NOT the file your MQTT clients are in: an operator is
   # not a device, and one file would let anything that can publish read the
   # shape of your fleet. /health is never authenticated.
-  # operations:
-  #   listen:
+  operations:
+    listen:
   #     # tcp and unix are each the same list-or-map shape broker.mqtt.listen
   #     # gives a kind (RFC 0002 "Several listeners of a kind"): one door,
   #     # named after its kind, as below - or a list of named doors once
@@ -384,8 +385,8 @@ broker:
   #     #         cert_file: /etc/saguin/tls/ops.pem
   #     #         key_file: /etc/saguin/tls/ops-key.pem
   #     #         client_ca_file: /etc/saguin/tls/operators-ca.pem
-  #     tcp:
-  #       address: 127.0.0.1:9090
+      tcp:
+        address: 127.0.0.1:9090
   #
   #       # TLS, the same block an MQTT listener takes. Add
   #       # client_ca_file and a client certificate is required - which

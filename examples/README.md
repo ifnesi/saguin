@@ -3,20 +3,25 @@
 Everything here runs. `examples/saguin.yaml` is a working configuration
 that names every key Sagüin accepts, and `examples/demo.py` is a guided
 tour that starts a broker against it and walks every channel type in
-order. Those need Go and the shared examples Python environment.
+order. The tour runs in Docker, or directly with Go and Python.
 
-**Two of them need a Docker daemon** and say so in the table below.
 `bento-connectors/` and `home-automation/` are stacks rather than scripts:
 one `docker compose up` each, and a README of their own.
 
 ## The guided tour
 
+With nothing installed but Docker, from the repository root:
+
 ```sh
-python3 -m venv .venv
-. .venv/bin/activate
-pip install -r examples/requirements.txt
-python examples/demo.py
+cd examples
+docker compose run --rm --build demo           # the concise tour
+docker compose run --rm --build demo --full    # every section
+docker compose down                            # stops the viewer afterwards
 ```
+
+Watch it in [Sagüin viewer](https://github.com/ifnesi/saguin-viewer) at
+<http://localhost:8080> while it runs: the topics, a live feed and replay.
+The tour runs against Sagüin's published image.
 
 It stops at every step and waits for ENTER, so it can be read at the speed
 of whoever is reading it, or presented to a room at the speed of whoever is
@@ -24,6 +29,16 @@ talking. With no arguments it gives the concise core tour. `--full` adds the
 security, partitioning, refusal, retry and dead-letter deep dives;
 `--section queue`, for example, runs one section independently. `--list`
 prints every section and `--no-pause` makes any form non-interactive.
+
+**Without Docker** it needs Go, to build the broker, and the shared examples
+Python environment, from the repository root:
+
+```sh
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r examples/requirements.txt
+python examples/demo.py
+```
 
 It builds the broker, starts it, drives it, and stops it. `make demo` runs the
 same concise path, `make demo-full` runs all of it, and `make demo-server`
@@ -67,6 +82,8 @@ line of it.
 | | |
 |---|---|
 | `demo.py` | The guided tour |
+| `docker-compose.yml`, `demo.Dockerfile`, `saguin-viewer.yaml` | The guided tour in a container, with nothing installed but Docker, and the viewer watching it |
+| `docker/` | Sagüin and its viewer as published images, for your own devices rather than a demo. Its configuration mounts beside it |
 | `saguin.yaml` | Every key Sagüin accepts, with its default and the reasoning beside it. The tour runs against this file unchanged |
 | `acl.yaml` | What each client may do: roles carrying rules, clients given roles by pattern |
 | `clients.passwd` | Who may connect. Mosquitto's format, hash for hash |

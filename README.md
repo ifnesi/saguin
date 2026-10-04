@@ -259,6 +259,18 @@ docker run -d --name saguin -p 1883:1883 \
 The named volume `saguin-data` is writable by the image's user. A host
 directory mounted for the data must be writable by uid 10001.
 
+To run it with [Sagüin viewer](https://github.com/ifnesi/saguin-viewer),
+[`examples/docker`](examples/docker/docker-compose.yml) is a compose file and the
+configuration it mounts. Port 1883 and the viewer on `127.0.0.1:8080` are
+published; the operations listener stays on the compose network, behind a
+password only the viewer holds:
+
+```sh
+cd examples/docker
+echo "VIEWER_PASSWORD=<choose one>" > .env
+docker compose up -d
+```
+
 ## Quick start
 
 Everything below runs from the repository root, with `bin/saguin` built as

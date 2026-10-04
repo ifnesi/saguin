@@ -6,10 +6,13 @@ as their broker: zigbee2mqtt for the Zigbee devices and rtl_433 for the
 did not ask for.
 
 ```sh
+cd examples/home-automation
 docker compose up -d --build
 ```
 
-That is the whole of it. Open the viewer at **<http://localhost:4001>** and
+That is the whole of it. Sagüin and the viewer are their published images,
+`ghcr.io/ifnesi/saguin` and `ghcr.io/ifnesi/saguin-viewer`; `--build` builds
+only the two emulated radios, from this repository. Open the viewer at **<http://localhost:4001>** and
 watch the readings arrive.
 
 
@@ -28,13 +31,6 @@ Brought up on top of each other, the second does not refuse cleanly: its
 broker starts *healthy with no published ports*, and `localhost:1883` keeps
 answering - from the first demo's broker. Everything then measures the wrong
 one.
-
-**The viewer needs a second checkout**, because it is not in this
-repository: clone [saguin-viewer](https://github.com/ifnesi/saguin-viewer)
-beside saguin, which is where `docker-compose.yml` looks, or export
-`SAGUIN_VIEWER_DIR` pointing at it anywhere else.
-
-    git clone https://github.com/ifnesi/saguin-viewer.git ../../../saguin-viewer
 
 | | |
 |---|---|
@@ -344,12 +340,12 @@ docker compose logs -f zigbee2mqtt      # the Zigbee bridge
 docker compose logs -f rtl433           # every reading that came off the air
 docker compose logs -f coordinator      # what the Zigbee radio answered
 docker compose logs -f transmitter      # every burst the 433MHz radio sent
-docker compose exec saguin sh           # a shell, on purpose
+docker compose exec saguin saguin --route /etc/saguin/saguin.yaml 'rtl433/#'
 docker compose down -v                  # and forget everything
 ```
 
-**The broker's database is on a named volume, so it outlives a rebuild** - and
-a broker built with a newer storage schema refuses a volume an older one
+**The broker's database is on a named volume, so it outlives a new image** - and
+a broker with a newer storage schema refuses a volume an older one
 wrote, naming both versions, and the container restarts on that refusal.
 Reset the volume with `docker compose down -v`, or first export it with
 `saguin --sqlite-to-snapshots` on the older image.

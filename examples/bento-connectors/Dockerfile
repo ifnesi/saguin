@@ -7,13 +7,11 @@
 # goes back to `image: ghcr.io/warpstreamlabs/bento:<version>` for both
 # pipelines.
 #
-# Two more images come out of this file - the broker and the traffic
-# generator - and their stages are at the bottom. **None of the three is a
-# release image and none wants to become one.** Publishing saguin as a
-# container is its own piece of work: a tag, a registry, a supply chain, and
-# an example is the wrong place for it. What these are for is putting the
-# broker, the pipelines and a load on one network, so the stack is
-# `docker compose up` and nothing else.
+# One more image comes out of this file - the traffic generator - and its
+# stage is at the bottom. saguin is not built here: docker-compose.yml runs
+# its published image, ghcr.io/ifnesi/saguin, so the broker, the pipelines
+# and a load share one network and the stack is `docker compose up` and
+# nothing else.
 #
 # The alternative for saguin was leaving it on the host and reaching it
 # through host.docker.internal. That was tried and abandoned, and it is worth
@@ -26,8 +24,8 @@
 # On the compose network there is no host, no gateway and no firewall.
 #
 # **Every stage builds from the repository root**, so docker-compose.yml
-# names one context for all three. The Bento stage needs nothing from it and
-# fetches its own source; the other two compile and copy out of the checkout.
+# names one context for both. The Bento stage needs nothing from it and
+# fetches its own source; the traffic generator is copied out of the checkout.
 
 # The toolchain Bento's own go.mod asks for. A newer one would work; naming
 # the exact version means the build does not start depending on whatever
@@ -98,62 +96,6 @@ ENTRYPOINT ["/usr/local/bin/bento"]
 
 
 # --------------------------------------------------------------------------
-# saguin, built from this checkout.
-#
-# When an official image exists, docker-compose.yml swaps `build:` for
-# `image:` and this stage goes.
-
-# Pinned to the 1.25 line rather than an exact patch: go.mod requires 1.25
-# and a demonstration should pick up that line's fixes. It is not the
-# toolchain CI pins, and nothing here depends on it being the same one -
-# what is built is a binary, not a formatting decision.
-FROM docker.io/library/golang:1.25-alpine AS saguin-build
-
-# git, only so the build can stamp what it built. Go reads the revision out
-# of the checkout and puts it in the binary, but only when git is on PATH -
-# without it saguin reports its version as "dev", and saguin_build_info
-# exists precisely to answer "which saguin is this". A dashboard whose
-# version panel says "dev" is demonstrating the wrong thing.
-RUN apk add --no-cache git
-
-WORKDIR /src
-
-# The module graph first, so a change to saguin's own source does not
-# re-download the dependencies.
-COPY go.mod go.sum ./
-RUN go mod download
-
-COPY . .
-
-# CGO off, which costs nothing here: saguin's SQLite provider is
-# modernc.org/sqlite, Go rather than a binding, so there is no C to link.
-# What it buys is a static binary that runs on a base image with no libc
-# of its own.
-RUN CGO_ENABLED=0 go build -trimpath -o /out/saguin ./cmd/saguin
-
-
-FROM docker.io/library/alpine:3.22 AS broker
-
-# A shell and a package manager, on purpose. This is a thing to poke at:
-# `docker compose exec saguin sh` and read the database, or run
-# `saguin --passwd` against the credential file. A distroless image would
-# be the right answer for a release and the wrong one here.
-RUN adduser -D -H -u 10001 saguin \
- && mkdir -p /var/lib/saguin \
- && chown saguin:saguin /var/lib/saguin
-
-COPY --from=saguin-build /out/saguin /usr/local/bin/saguin
-
-USER saguin
-WORKDIR /var/lib/saguin
-
-EXPOSE 1883 9090
-
-ENTRYPOINT ["/usr/local/bin/saguin"]
-CMD ["--config", "/etc/saguin/saguin.yaml"]
-
-
-# --------------------------------------------------------------------------
 # The traffic generator.
 #
 # It is a separate image rather than a script the broker runs, because they
@@ -175,9 +117,8 @@ ENTRYPOINT ["python3", "-u", "/traffic.py"]
 
 # --------------------------------------------------------------------------
 # **The viewer is not built here, and no longer in this repository either.** It
-# is `ifnesi/saguin-viewer`, with a Dockerfile of its own, and
-# docker-compose.yml builds from a checkout of it - beside saguin by default, or
-# wherever `SAGUIN_VIEWER_DIR` points.
+# is `ifnesi/saguin-viewer`, and docker-compose.yml runs its published image,
+# ghcr.io/ifnesi/saguin-viewer.
 #
 # It exists because MQTT Explorer is no window onto this stack: that image
 # builds its connection with MQTT.js and never sets protocolVersion, so it
