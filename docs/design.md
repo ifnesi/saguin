@@ -209,8 +209,7 @@ flowchart LR
     socket -. "Incoming bytes" .-> reader
     writer -. "Outgoing bytes" .-> socket
     reader -- "Inbound events, all readers' shared channel" --> core
-    writer -- "Delivery outcomes; request-ack completion;<br/>
-    close last, on readers' channel" --> core
+    writer -- "Delivery outcomes; request-ack completion;<br/>close last, on readers' channel" --> core
     writer -- "Final entry taken, by closing a notification channel" --> core
     core -- "Cut cause, by closing a notification channel before the cut" --> reader
     core -- "Cut cause, by closing a notification channel before the cut" --> writer
@@ -234,8 +233,7 @@ flowchart LR
     reader["Reader"]
     writer["Writer"]
 
-    reader -- "Bridge CONNECT; CONNECT / bridge CONNACK settings;<br/>
-    read stop, end, end-report completion" --> writer
+    reader -- "Bridge CONNECT; CONNECT / bridge CONNACK settings;<br/>read stop, end, end-report completion" --> writer
     reader -- "A bridge's PINGRESP notices" --> writer
     writer -- "Reply slots" --> reader
     writer -- "Acknowledgement write begin/success/failure; stop" --> reader
@@ -254,8 +252,7 @@ flowchart LR
     listener["MQTT listener"]
     conn["Reader + Writer"]
 
-    listener -. "Accepts, starts; WebSocket: net/http starts reader,<br/>
-    reader starts writer" .-> conn
+    listener -. "Accepts, starts; WebSocket: net/http starts reader,<br/>reader starts writer" .-> conn
     listener -- "New connection" --> core
     core -- "Permits back, one per close" --> listener
 
