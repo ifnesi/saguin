@@ -1,0 +1,4 @@
+interface:
+  display_name: "Saguin Config"
+  short_description: "Design a saguin configuration in a guided session"
+  default_prompt: "Use $saguin-config to work out a saguin configuration for my deployment."

@@ -14,8 +14,8 @@ container to run, a collection to keep in step with the commit, and a network
 hop per query, for a dot product.
 
 **The chunks are the same ones the vector path indexes** - heading-aware,
-fence-aware, a numbered rule to a chunk - so a hit cites `docs/invariants.md ›
-Queue correctness › invariant 4` exactly as it always did, and the score is
+fence-aware, a numbered rule to a chunk - so a hit cites `docs/design.md ›
+Sagüin design › Rules › R2` exactly as grep does, and the score is
 plain cosine similarity, which is what `SAGUIN_MIN_SCORE` was always measured
 against. Retrieval changed shape; a reference did not.
 """

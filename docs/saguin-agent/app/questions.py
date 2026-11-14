@@ -61,8 +61,8 @@ def run(base: str, path: str) -> int:
             detail = "refused" if ok else "answered anyway"
         else:
             # A fact the corpus states in more than one place has more than one
-            # right citation: the restart rule is invariant 15 and also RFC
-            # 0003's section literally named "Restart". expect_citation may be a
+            # right citation: a configuration key is in config.md and also in
+            # the comments of examples/saguin.yaml. expect_citation may be a
             # single string or a list, and any one matching is a pass. The
             # response must also be an answer rather than a refusal.
             want = q["expect_citation"]

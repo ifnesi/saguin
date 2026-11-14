@@ -1,321 +1,207 @@
 package store
 
 import (
-	"sort"
-	"time"
+	"context"
+	"database/sql"
+	"errors"
+
+	"github.com/ifnesi/saguin/internal/payload"
 )
 
-// Exchange names one client's half-finished exactly-once publish.
-//
-// **Both halves are needed and neither substitutes for the other.** MQTT
-// gives each session its own set of packet identifiers, assigned
-// independently by each end (section 2.2.1), so identifier 1 from one
-// client and identifier 1 from another are unrelated messages, and
-// identifier 1 the server sent to a client is unrelated to identifier 1
-// that client sent to the server. A store keyed on the number alone would
-// hand one publisher another's message.
-//
-// Client is the session rather than the connection. A client that
-// reconnects to a session saguin still holds re-sends its PUBLISH under the
-// same identifier and must be answered with the message already held; a
-// client that asks for a fresh session under the same name must not, which
-// is why a clean start drops what that name held.
-type Exchange struct {
-	Client   string
+// ReadHeldPublish loads only a held publication's metadata for its PUBREL.
+// The payload moves inside the publication transaction, without a body read.
+type ReadHeldPublish struct {
+	Session  int64
+	Bridge   int64
 	PacketID uint16
-}
-
-// HeldPublish is an exactly-once publish a channel's store is holding for
-// its release: the exchange that sent it, its record without an offset, and
-// when it was first held.
-//
-// **It is held in the store it will be kept in** (RFC 0003 "Exactly once,
-// and where the unfinished ones wait"), so the release is one operation in
-// one store: the record takes its offset and the hold goes together, and
-// there is never a moment with both or with neither. Held anywhere else, the
-// release is two writes in two stores, and a refusal or a crash between them
-// loses a message whose PUBREC told the publisher it was taken.
-type HeldPublish struct {
-	Exchange Exchange
 	Record   Record
-	HeldAt   time.Time
 }
 
-// holds are the exactly-once publishes one memory store is holding. They
-// live beside the store's records, under its lock, and nothing that reads
-// the channel sees them: they have no offset, no reader is served one, no
-// Trim takes one, and the channel's own size does not count them. The
-// provider's bound does, from the moment each is held.
-type holds struct {
-	by    map[Exchange]HeldPublish
-	bytes int64
+// ReadConn fixes the source at the PUBREL's ordered store boundary.
+func (h *ReadHeldPublish) ReadConn(conn *Conn) error {
+	r := &h.Record
+	err := conn.Prepared(readHeldPublish).QueryRowContext(context.Background(), h.Session, h.Bridge, h.PacketID).Scan(
+		&r.Channel, &r.Time, &r.Topic, &r.Expires, &r.PropertiesSize, &r.HeldRetain, &r.PayloadSize, &r.Retained)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errors.New("store: missing held publication at PUBREL read")
+	}
+	r.QoS, r.HeldSession, r.HeldPacket = 2, h.Session, h.PacketID
+	r.Bridge = h.Bridge
+	r.PublishedRetained = r.Channel == 1 && r.HeldRetain
+	r.Retained = r.Retained || (r.PublishedRetained && r.PayloadSize != 0)
+	return err
 }
 
-// hold keeps a publish for its release, taking its room from the provider.
-// A repeat of one already held is success and changes nothing, which is
-// [MQTT-4.3.3-10] and keeps the clock the first copy started. The caller
-// holds the store's lock.
-func (h *holds) hold(e Exchange, r Record, now time.Time, q *Quota) error {
-	if _, ok := h.by[e]; ok {
-		return nil
-	}
-	size := RecordSize(r)
-	if !q.Take(size) {
-		return ErrProviderFull
-	}
-	if h.by == nil {
-		h.by = map[Exchange]HeldPublish{}
-	}
-	r.Offset = 0
-	h.by[e] = HeldPublish{Exchange: e, Record: r, HeldAt: now}
-	h.bytes += size
-	return nil
-}
-
-// peek is the publish held for an exchange, left where it is. The caller
-// holds the store's lock.
-func (h *holds) peek(e Exchange) (HeldPublish, bool) {
-	p, ok := h.by[e]
-	return p, ok
-}
-
-// take removes a hold whose bytes become the record's: the provider's count
-// does not move, because the room the hold took is the room the record
-// takes. The caller holds the store's lock and has already decided the
-// record is stored.
-func (h *holds) take(e Exchange) {
-	if p, ok := h.by[e]; ok {
-		h.bytes -= RecordSize(p.Record)
-		delete(h.by, e)
-	}
-}
-
-// drop removes a hold and gives its room back to the provider, and reports
-// whether there was one. The caller holds the store's lock.
-func (h *holds) drop(e Exchange, q *Quota) bool {
-	p, ok := h.by[e]
-	if !ok {
-		return false
-	}
-	size := RecordSize(p.Record)
-	h.bytes -= size
-	q.Give(size)
-	delete(h.by, e)
-	return true
-}
-
-// list is every hold, by client and then packet identifier. The caller
-// holds the store's lock.
-func (h *holds) list() []HeldPublish {
-	out := make([]HeldPublish, 0, len(h.by))
-	for _, p := range h.by {
-		out = append(out, p)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Exchange.Client != out[j].Exchange.Client {
-			return out[i].Exchange.Client < out[j].Exchange.Client
+func (r *Record) writeHeld(tx *Tx) (bool, error) {
+	ctx := context.Background()
+	if r.Offset == 0 {
+		var expires any
+		if r.Expires.Valid {
+			expires = r.Expires.Int64
 		}
-		return out[i].Exchange.PacketID < out[j].Exchange.PacketID
-	})
-	return out
-}
-
-// restore puts back what a snapshot held. Their room is charged with the
-// store's own when the provider's bound is given (SetQuota). The caller
-// holds the store's lock.
-func (h *holds) restore(held []HeldPublish) {
-	for _, p := range held {
-		if h.by == nil {
-			h.by = map[Exchange]HeldPublish{}
+		_, err := tx.Prepared(addHeldPublish).ExecContext(ctx, r.HeldSession, r.Bridge, r.HeldPacket, r.Channel,
+			r.ID, r.Time, r.Topic, r.Publisher, expires, r.Properties, r.HeldRetain,
+			payload.Stored(r.Payload, r.StoredPayload), max(len(r.Payload), r.PayloadSize))
+		return false, err
+	}
+	args := []any{r.Offset, r.PublishedRetained, r.Retained, r.HeldSession, r.Bridge, r.HeldPacket}
+	updated := false
+	var err error
+	if r.Retained && r.Channel != 1 {
+		updated, err = tx.updateRecord(updateLatestHeld, args)
+		if err != nil {
+			return false, err
 		}
-		p.Record.Offset = 0
-		h.by[p.Exchange] = p
-		h.bytes += RecordSize(p.Record)
+	}
+	if !updated {
+		moved, err := tx.updateRecord(moveHeldPublish, args)
+		if err != nil {
+			return false, err
+		}
+		if !moved {
+			return false, errors.New("store: missing held publication at PUBREL commit")
+		}
+	}
+	_, err = tx.Prepared(deleteHeldPublish).ExecContext(ctx, r.HeldSession, r.Bridge, r.HeldPacket)
+	return updated, err
+}
+
+// ReadTx uses the same topic charge query during a mutation. On $broadcast it
+// includes held replacements, so a smaller committed value cannot release their room.
+func (r *RetainedCharge) ReadTx(tx *Tx) error {
+	return tx.Prepared(retainedCharge).QueryRowContext(context.Background(), r.Topic, r.Channel).Scan(&r.Bytes, &r.Offset)
+}
+
+// HeldIdentifier is the bounded routing state restored with an incoming exchange.
+// No publication properties or payload leave the store during CONNECT.
+type HeldIdentifier struct {
+	PacketID uint16
+	Channel  int64
+}
+
+func loadHeld(conn *Conn, session, bridge int64) ([]HeldIdentifier, error) {
+	rows, err := conn.Prepared(loadHeldIdentifiers).QueryContext(context.Background(), session, bridge)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []HeldIdentifier
+	for rows.Next() {
+		var id HeldIdentifier
+		if err := rows.Scan(&id.PacketID, &id.Channel); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, finishRows(rows)
+}
+
+// HeldChanges contains aggregate reservations released by a session ending,
+// never held payloads or a topic catalogue. Channels are bounded by configuration.
+type HeldChanges struct {
+	Channels map[int64]int64
+	Retained int64
+	Count    uint64
+}
+
+// removeHeld visits bounded pages while the ending transaction owns the rows.
+// Before and after charges use the shared replacement rule for each deletion.
+// Owners with no held rows need no aggregate allocation.
+func removeHeld(tx *Tx, session, bridge int64, changes **HeldChanges) error {
+	var after uint16
+	for {
+		rows, err := tx.Prepared(endingHeld).QueryContext(context.Background(), session, bridge, after)
+		if err != nil {
+			return err
+		}
+		var page [MetadataPage]struct {
+			id            uint16
+			channel, size int64
+			topic         string
+			retained      bool
+		}
+		n := 0
+		err = scanRows(rows, func(row *sql.Rows) error {
+			p := &page[n]
+			if err := row.Scan(&p.id, &p.channel, &p.size, &p.topic, &p.retained); err != nil {
+				return err
+			}
+			n++
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		for _, p := range page[:n] {
+			if *changes == nil {
+				*changes = &HeldChanges{Channels: make(map[int64]int64)}
+			}
+			h := *changes
+			charge := RetainedCharge{Topic: p.topic}
+			if p.retained {
+				if err := charge.ReadTx(tx); err != nil {
+					return err
+				}
+			}
+			before := charge.Bytes
+			if _, err := tx.Prepared(deleteHeldPublish).ExecContext(context.Background(), session, bridge, p.id); err != nil {
+				return err
+			}
+			if p.retained {
+				if err := charge.ReadTx(tx); err != nil {
+					return err
+				}
+				h.Retained += before - charge.Bytes
+			}
+			h.Channels[p.channel] += p.size
+			h.Count++
+			after = p.id
+		}
+		if n < MetadataPage {
+			return nil
+		}
 	}
 }
 
-// Hold keeps an exactly-once publish in this channel until its release,
-// without an offset: no reader sees it and no Trim takes it (HeldPublish).
-// It is refused ErrFull where the channel is at its own max_bytes, as a
-// publish would be, and ErrProviderFull where the provider has no room.
-func (l *Log) Hold(e Exchange, r Record, now time.Time) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if _, ok := l.holds.peek(e); ok {
-		return nil
+// discardOrphanHeld removes non-durable holds before startup loads charges.
+// The ordinary writer transaction supplies full-disk reporting and rollback.
+type discardOrphanHeld struct{ count uint64 }
+
+func (*discardOrphanHeld) Records() int { return 0 }
+
+func (d *discardOrphanHeld) WriteTx(tx *Tx) error {
+	result, err := tx.Prepared(deleteOrphanHeld).ExecContext(context.Background())
+	if err != nil {
+		return err
 	}
-	if l.maxBytes > 0 && l.held+RecordSize(r) > l.maxBytes {
-		return ErrFull
+	n, err := result.RowsAffected()
+	d.count = uint64(n)
+	return err
+}
+
+// loadHeldCharges obtains aggregates after startup's non-durable cleanup.
+func (s *State) loadHeldCharges(conn *Conn) error {
+	rows, err := conn.Prepared(heldChannelTotals).QueryContext(context.Background())
+	if err != nil {
+		return err
 	}
-	return l.holds.hold(e, r, now, l.quota)
-}
-
-// ReleaseHold stores a held publish as the channel's next record and forgets the
-// hold, in one hold of the lock (HeldPublish). The provider's room is never
-// what refuses it - the hold took that - but the channel's own max_bytes
-// can: then it answers ErrFull, the hold stays, and no offset is taken. The
-// bool is false where nothing is held for the exchange.
-func (l *Log) ReleaseHold(e Exchange) (Record, bool, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	p, ok := l.holds.peek(e)
-	if !ok {
-		return Record{}, false, nil
+	defer func() { _ = rows.Close() }()
+	i := 0
+	for rows.Next() {
+		var channel, size int64
+		if err := rows.Scan(&channel, &size); err != nil {
+			return err
+		}
+		for i < len(s.Channels) && s.Channels[i].ID < channel {
+			i++
+		}
+		if i == len(s.Channels) || s.Channels[i].ID != channel {
+			return errors.New("store: held publication names a missing channel")
+		}
+		s.Channels[i].HeldBytes = size
 	}
-	r := p.Record
-	size := RecordSize(r)
-	if l.maxBytes > 0 && l.held+size > l.maxBytes {
-		return Record{}, true, ErrFull
+	if err := finishRows(rows); err != nil {
+		return err
 	}
-	l.holds.take(e)
-	r.Offset = l.next
-	l.next++
-	l.held += size
-	l.records = append(l.records, r)
-	return r, true, nil
-}
-
-// DropHold forgets a hold without storing it, giving its room back, and reports
-// whether there was one.
-func (l *Log) DropHold(e Exchange) (bool, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.holds.drop(e, l.quota), nil
-}
-
-// Holds is every publish this channel is holding for its release.
-func (l *Log) Holds() ([]HeldPublish, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.holds.list(), nil
-}
-
-// RestoreHeld puts back the holds a snapshot kept, before the provider's
-// bound is given.
-func (l *Log) RestoreHeld(held []HeldPublish) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.holds.restore(held)
-}
-
-// Hold keeps an exactly-once publish in this channel until its release; see
-// Log.Hold. A latest channel has no size bound of its own, so only the
-// provider can refuse it.
-func (l *Latest) Hold(e Exchange, r Record, now time.Time) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.holds.hold(e, r, now, l.quota)
-}
-
-// ReleaseHold makes a held publish the topic's value and forgets the hold, in
-// one hold of the lock; see Log.ReleaseHold. The value it replaces gives its
-// room back.
-//
-// **A deletion of a topic with no live value stores nothing**, as the
-// publish path stores nothing for one (a client repeating a deletion would
-// otherwise fill the channel with them): the hold goes, its room comes back,
-// and the record is answered without an offset for the caller to deliver as
-// it delivers any deletion.
-func (l *Latest) ReleaseHold(e Exchange) (Record, bool, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	p, ok := l.holds.peek(e)
-	if !ok {
-		return Record{}, false, nil
-	}
-	r := p.Record
-	old, had := l.current[r.Topic]
-	if IsDeletion(r) && (!had || IsDeletion(old)) {
-		l.holds.drop(e, l.quota)
-		return r, true, nil
-	}
-	l.holds.take(e)
-	if had {
-		l.quota.Give(RecordSize(old))
-	}
-	r.Offset = l.next
-	l.next++
-	l.current[r.Topic] = r
-	return r, true, nil
-}
-
-// DropHold forgets a hold without storing it; see Log.DropHold.
-func (l *Latest) DropHold(e Exchange) (bool, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.holds.drop(e, l.quota), nil
-}
-
-// Holds is every publish this channel is holding for its release.
-func (l *Latest) Holds() ([]HeldPublish, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.holds.list(), nil
-}
-
-// RestoreHeld puts back the holds a snapshot kept; see Log.RestoreHeld.
-func (l *Latest) RestoreHeld(held []HeldPublish) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.holds.restore(held)
-}
-
-// Hold keeps an exactly-once publish in this queue until its release; see
-// Log.Hold.
-func (q *Queue) Hold(e Exchange, r Record, now time.Time) error {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	if _, ok := q.holds.peek(e); ok {
-		return nil
-	}
-	if q.maxBytes > 0 && q.held+RecordSize(r) > q.maxBytes {
-		return ErrFull
-	}
-	return q.holds.hold(e, r, now, q.quota)
-}
-
-// ReleaseHold makes a held publish available work and forgets the hold, in one
-// hold of the lock; see Log.ReleaseHold. A queue at its own max_bytes answers
-// ErrFull and keeps the hold, and has room again as its workers resolve
-// what they hold.
-func (q *Queue) ReleaseHold(e Exchange) (Record, bool, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	p, ok := q.holds.peek(e)
-	if !ok {
-		return Record{}, false, nil
-	}
-	r := p.Record
-	size := RecordSize(r)
-	if q.maxBytes > 0 && q.held+size > q.maxBytes {
-		return Record{}, true, ErrFull
-	}
-	q.holds.take(e)
-	r.Offset = q.next
-	q.next++
-	q.held += size
-	q.items[r.Offset] = &Item{Record: r, State: Available}
-	q.order = append(q.order, r.Offset)
-	return r, true, nil
-}
-
-// DropHold forgets a hold without storing it; see Log.DropHold.
-func (q *Queue) DropHold(e Exchange) (bool, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.holds.drop(e, q.quota), nil
-}
-
-// Holds is every publish this queue is holding for its release.
-func (q *Queue) Holds() ([]HeldPublish, error) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.holds.list(), nil
-}
-
-// RestoreHeld puts back the holds a snapshot kept; see Log.RestoreHeld.
-func (q *Queue) RestoreHeld(held []HeldPublish) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.holds.restore(held)
+	return conn.Prepared(retainedChargesTotal).QueryRowContext(context.Background()).Scan(&s.RetainedCharge)
 }

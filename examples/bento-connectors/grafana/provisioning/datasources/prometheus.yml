@@ -16,4 +16,4 @@ datasources:
     jsonData:
       # Matches the scrape interval, so Grafana's "auto" step does not ask
       # for a resolution the data does not have.
-      timeInterval: 15s
+      timeInterval: 60s

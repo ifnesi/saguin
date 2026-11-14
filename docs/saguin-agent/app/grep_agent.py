@@ -5,8 +5,8 @@ this searches them the way a person at a terminal would rather than through a
 vector database. Each turn the model chooses one tool:
 
 - `grep` - exact-term search. Finds a rule whose words the question shares,
-  which is where dense embedding alone kept failing ("can two workers get the
-  same job" is invariant 4, whose words the question does not use).
+  which is where dense embedding alone kept failing ("can the core block on
+  the disk" is R2, whose words the question does not use).
 - `semantic_search` - a section that *means* what the question means when they
   share no words ("turn verification off on a bridge" and "there is no way to
   turn verification off"). It carries a score, which is the refusal signal grep
@@ -211,12 +211,12 @@ def _system(min_score: float) -> str:
         "results of a first search already. Read them.\n"
         "- A result names a document, a line number and the section it falls "
         "under. Open the section it points to: {\"action\": \"read\", "
-        "\"path\": \"docs/invariants.md\", \"start\": 54, \"end\": 62}. Read "
+        "\"path\": \"docs/design.md\", \"start\": 18, \"end\": 21}. Read "
         "around the line a hit sits on, not only the matching line.\n"
         "- If the first search did not find it, search again with the words the "
         "documents themselves use rather than the words the question used. "
         "saguin's documents say \"in flight\", \"floor\", \"record\", "
-        "\"offset\", \"channel\", \"invariant\", \"consumer\" - a question may "
+        "\"offset\", \"channel\", \"core\", \"consumer\" - a question may "
         "say \"unacknowledged\", \"oldest\", \"message\", \"worker\", \"job\".\n"
         "- semantic_search returns a score from 0 to 1: a top score below about "
         f"{min_score} means nothing in the documents is closely related.\n"
@@ -367,7 +367,7 @@ def run(
         yield {"type": "answer", "answer": Answer(
             markdown=(
                 "**The documentation does not say.**\n\n"
-                "Nothing in saguin's README, invariants, RFCs or the other "
+                "Nothing in saguin's README, design, configuration or the other "
                 "documents is close enough to this question to answer it."
             ),
             refused=True, turns=turn, trace=trace,

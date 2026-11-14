@@ -74,12 +74,7 @@ func (d *device) drift() {
 	d.tempC += (d.rng.Float64() - 0.5) + (d.baseTemp-d.tempC)*0.1
 	d.tempC = float64(int(d.tempC*10)) / 10
 	d.humidity += d.rng.Intn(3) - 1 + int((float64(d.baseHum)-float64(d.humidity))*0.1)
-	if d.humidity < 0 {
-		d.humidity = 0
-	}
-	if d.humidity > 100 {
-		d.humidity = 100
-	}
+	d.humidity = min(100, max(0, d.humidity))
 }
 
 // bits is the frame this device would send now, most significant bit first.

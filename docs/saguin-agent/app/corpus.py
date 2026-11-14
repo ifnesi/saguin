@@ -2,7 +2,7 @@
 
 **A chunk is a heading's worth of text, not a fixed number of characters.**
 These documents state a rule and then the failure it prevents, and the
-second half is what makes the first comprehensible - an invariant severed
+second half is what makes the first comprehensible - a rule severed
 from its failure reads as an arbitrary restriction, and a configuration key
 severed from its reasoning reads as a suggestion. Fixed-size chunking cuts
 exactly there, and it cuts YAML blocks in half, which produces configuration
@@ -24,10 +24,14 @@ from pathlib import Path
 # to open the file it cites.
 CORPUS = [
     "README.md",
-    "docs/invariants.md",
-    "docs/rfcs/*.md",
+    "docs/design.md",
+    "docs/config.md",
+    "docs/metrics.md",
+    "docs/storage.md",
+    "examples/README.md",
     "examples/saguin.yaml",
-    "SECURITY.md",
+    "docs/mqtt/mqtt-v5.md",
+    "docs/mqtt/mqtt-v3.1.1.md",
     "CONTRIBUTING.md",
     "CHANGELOG.md",
     "LICENSE",
@@ -39,7 +43,7 @@ CORPUS = [
 # answer half the questions asked of it with "Definitions" or
 # "Redistribution" while crowding out better matches; whole, it answers the
 # only question anybody actually asks of it. The test for this list: would a
-# reader be helped by landing in the middle of this document? For an RFC
+# reader be helped by landing in the middle of this document? For a design
 # section, yes. For a licence, never.
 WHOLE = {"LICENSE"}
 
@@ -47,7 +51,7 @@ WHOLE = {"LICENSE"}
 #
 # LICENSE is one chunk of 11,310 characters, and one vector over that much
 # boilerplate is diluted to the point of matching nothing: "what licence is
-# saguin under?" returned CONTRIBUTING, SECURITY and an invariant, with the
+# saguin under?" returned CONTRIBUTING, the changelog and a rule, with the
 # licence itself nowhere in the top three. So the text stored and shown is
 # the whole document, and the text *embedded* is a card that says what the
 # document is - which is the question anybody actually asks of it.
@@ -62,17 +66,17 @@ CARDS = {
 
 # Documents whose sections are cut again into numbered rules.
 #
-# The invariants are fifteen numbered rules, each written as a statement and
-# then the failure it prevents, and they are the unit a reader means: "why
-# is that refused" is answered by invariant 4, not by the section it sits
-# in. Chunked by heading alone, four rules share a chunk, one of them gets
-# split at a paragraph boundary, and the citation reads "Queue correctness
-# (1/2)" where it could read "invariant 4".
+# The design opens with nine numbered rules, R1 to R9, each a bold-led
+# bullet under its "Rules" heading, and they are the unit a reader means:
+# "why does the core never block" is answered by R2, not by the section it
+# sits in. Chunked by heading alone, the nine share a chunk, and the
+# citation reads "Rules" where it could read "R2". The marker's group is the
+# rule's name as the design writes it, and that name is what a citation
+# carries.
 #
-# **A numbered rule is never split**, whatever its length: an invariant
-# severed from the failure it prevents is the one cut these documents cannot
-# survive, and two of the fifteen are longer than the bound below.
-NUMBERED = {"docs/invariants.md": re.compile(r"^\*\*(\d+)\.\s")}
+# **A numbered rule is never split**, whatever its length: a rule severed
+# from the sections it points to is the one cut a citation cannot survive.
+NUMBERED = {"docs/design.md": re.compile(r"^- \*\*(R\d+)\.\s")}
 
 # A chunk longer than this is split on paragraph boundaries, keeping its
 # heading path. Not a hard rule about meaning - a bound on what one
@@ -104,13 +108,9 @@ class Chunk:
 
         **The heading path goes in front of the text.** Without it a chunk
         about restarts and deliveries is only its own prose, and a question
-        naming "invariant 15" or "TLS on a listener" has nothing to match
+        naming "R4" or "TLS on a listener" has nothing to match
         against - the words a reader uses to ask are frequently the words in
         the heading rather than in the body.
-
-        Measured on six trap questions: with
-        bare text, "what happens to unacknowledged queue work when the
-        broker restarts" did not return invariant 15 at all.
         """
         where = " › ".join(self.heading_path)
         lead = f"{self.document} › {where}" if where else self.document
@@ -120,9 +120,9 @@ class Chunk:
     def citation(self) -> str:
         """What goes under an answer.
 
-        The path rather than the heading alone: `RFC 0002 › TLS on a
-        listener › Client certificates` tells a reader where to look, where
-        "Client certificates" alone tells them nothing about which document.
+        The path rather than the heading alone: `docs/design.md › Flows ›
+        CONNECT` tells a reader where to look, where "CONNECT" alone tells
+        them nothing about which document.
         """
         where = " › ".join(self.heading_path) if self.heading_path else ""
         cite = f"{self.document}" + (f" › {where}" if where else "")
@@ -155,9 +155,9 @@ def chunk_document(path: Path, root: Path) -> list[Chunk]:
 
     # A numbered document is not bounded during the section pass: the bound
     # would cut a section between two rules - or through one - before the
-    # numbering has a chance to cut it in the right place. Invariant 7 was
-    # severed exactly there, 418 characters of rule and 1,077 orphaned in a
-    # chunk carrying no number at all.
+    # numbering has a chance to cut it in the right place. The numbering pass
+    # bounds every chunk that is not a rule, so the design's long sections are
+    # still cut.
     numbered = NUMBERED.get(rel)
     chunks = _split_sections(rel, text, bound=numbered is None)
     if numbered is not None:
@@ -244,25 +244,26 @@ def _by_number(rel: str, chunks: list[Chunk], marker: re.Pattern[str]) -> list[C
     """Cut sections again at numbered rules, one chunk per rule.
 
     A rule keeps the section it came from in its heading path and gains its
-    own number, so a citation reads `docs/invariants.md › Queue correctness
-    › invariant 4` - which is what somebody would write by hand.
+    own name, so a citation reads `docs/design.md › Sagüin design › Rules ›
+    R4` - which is what somebody would write by hand.
 
     Text before the first number stays as the section's own chunk: the
-    invariants file opens with why the list exists and what happens if it
-    reaches twenty-five, which is worth retrieving and belongs to no rule.
+    Rules section opens with how each rule is checked, which is worth
+    retrieving and belongs to no rule. Every chunk that is not a rule is
+    bounded here, since the section pass left the whole document unbounded.
     """
     out: list[Chunk] = []
     for chunk in chunks:
         lines = chunk.text.split("\n")
         starts = [i for i, line in enumerate(lines) if marker.match(line)]
         if not starts:
-            out.append(chunk)
+            out.extend(_bounded(rel, chunk.heading_path, chunk.text))
             continue
 
         if starts[0] > 0:
             preamble = "\n".join(lines[: starts[0]]).strip()
             if preamble:
-                out.append(Chunk(document=rel, heading_path=list(chunk.heading_path), text=preamble))
+                out.extend(_bounded(rel, chunk.heading_path, preamble))
 
         bounds = starts + [len(lines)]
         for i, start in enumerate(starts):
@@ -271,7 +272,7 @@ def _by_number(rel: str, chunks: list[Chunk], marker: re.Pattern[str]) -> list[C
             out.append(
                 Chunk(
                     document=rel,
-                    heading_path=chunk.heading_path + [f"invariant {number}"],
+                    heading_path=chunk.heading_path + [number],
                     text=body,
                 )
             )
@@ -327,14 +328,19 @@ def _paragraphs(body: str) -> list[str]:
 def _plain(title: str) -> str:
     """A heading as a reader says it, without its markup.
 
-    The documents lean on bold and code spans in headings; a citation
-    reading "**`--licenses`**" is a citation somebody has to decode.
+    The documents lean on bold, code spans and links in headings; a citation
+    reading "**`--licenses`**" or "The goroutines ([R1](#rules))" is a
+    citation somebody has to decode.
     """
-    title = re.sub(r"`([^`]*)`", r"\1", title)
-    title = re.sub(r"\*\*([^*]*)\*\*", r"\1", title)
-    title = re.sub(r"\*([^*]*)\*", r"\1", title)
-    title = re.sub(r"<[^>]+>", "", title)
-    return title.strip()
+    title = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", title)
+    # A code span keeps its text untouched: `channels.<name>` is a key's
+    # shape, not an HTML tag to strip, so markup is removed only outside one.
+    parts = re.split(r"`([^`]*)`", title)
+    for i in range(0, len(parts), 2):
+        part = re.sub(r"\*\*([^*]*)\*\*", r"\1", parts[i])
+        part = re.sub(r"\*([^*]*)\*", r"\1", part)
+        parts[i] = re.sub(r"<[^>]+>", "", part)
+    return "".join(parts).strip()
 
 
 def chunk_all(root: Path) -> list[Chunk]:
@@ -348,9 +354,7 @@ def chunk_all(root: Path) -> list[Chunk]:
 def corpus_version(root: Path) -> str:
     """The commit the documents came from, or "unknown".
 
-    **An answer without it is a rumour.** saguin gained authentication, TLS
-    and mutual TLS in a single day, so every "no, saguin does not do that"
-    from the day before became false - and an index built last month answers
+    **An answer without it is a rumour.** An index built last month answers
     this month's questions with last month's documents, fluently and wrongly.
     The version travels with every answer for the same reason a citation
     does: so a reader can tell what they are being told about.

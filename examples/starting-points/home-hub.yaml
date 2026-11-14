@@ -1,6 +1,7 @@
-# A home hub on a Raspberry Pi: a few dozen devices, one sqlite file on the SD card, and no TLS inside the house.
-# A starting point to adapt, not an answer: paths and sizes are placeholders.
-# A test loads it, so its keys stay valid; the files it names are placeholders.
+# A home hub on a Raspberry Pi: a few dozen devices, one SQLite file on the
+# SD card, and no TLS inside the house.
+# A starting point to adapt. Stage demo credentials first (examples/README.md).
+# Runtime files use /var/tmp/saguin-demo; adapt paths and credentials for deployment.
 
 broker:
   id: home-hub
@@ -8,37 +9,27 @@ broker:
     listen:
       tcp:
         address: 0.0.0.0:1883
-    # RFC 0002 "Who may connect": every device has a password, and no
+    # Password authentication: every device has a password, and no
     # client connects without one.
-    password_file: /etc/saguin/clients.passwd
+    password_file: /var/tmp/saguin-demo/clients.passwd
     allow_anonymous: false
+  # A week of readings bounded inside the SD card. SQLite reuses freed
+  # pages; the file stays at its peak size. There is no provider max_bytes.
   storage:
-    default: home
-    # RFC 0002 "Retention is stated once": a week of readings, bounded well
-    # inside the SD card.
+    file_path: /var/tmp/saguin-demo/home.db
+    mode: normal
     default_retention_period: 7d
     default_retention_bytes: 256MiB
-    providers:
-      home:
-        type: sqlite
-        file_path: /var/lib/saguin/home.db
-        max_bytes: 1GiB
-        # RFC 0002 "How a sqlite provider reads": each reader buys consumer
-        # throughput with memory and write-ahead log; a hub with a few
-        # consumers wants those back.
-        read_connections: 1
-        # RFC 0004 "WAL, and synchronous=NORMAL": how often the log is
-        # forced to disk, 10ms to 1s, absent for 150ms. Longer spares a
-        # consumer SD card; a power cut loses about one interval.
-        flush_interval: 150ms
-  # RFC 0002 "Retained messages on a broadcast topic": retained values on
-  # the sqlite file, so they survive a process crash.
+    # Two to eight readers sit beside the one writer.
+    read_connections: 2
+    # Longer sync intervals spare the SD card. A power cut may lose commits
+    # since the last completed sync; a process crash loses none.
+    sync_interval: 150ms
+  # Retained broadcast values share the same file and survive process crashes.
   retained:
-    storage: home
     retention_period: none
   limits:
-    # RFC 0002 "The largest CONNECT before authentication": a machine short
-    # of memory is better served by a lower max_connections.
+    # A machine short of memory is better served by fewer connections.
     max_connections: 200
 channels:
   readings:

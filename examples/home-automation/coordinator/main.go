@@ -20,6 +20,7 @@ package main
 import (
 	"bufio"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -28,7 +29,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"strconv"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -187,7 +188,7 @@ func readFrame(r *bufio.Reader) (frame, error) {
 }
 
 // network is what both sides have to agree on. zigbee2mqtt's configuration
-// carries the same three values; if they disagree, zigbee-herdsman decides the
+// carries the same four values; if they disagree, zigbee-herdsman decides the
 // coordinator needs commissioning and walks a much longer road than this
 // program implements.
 type network struct {
@@ -260,10 +261,8 @@ func (n network) nib() []byte {
 }
 
 func reversed(in []byte) []byte {
-	out := make([]byte, len(in))
-	for i, b := range in {
-		out[len(in)-1-i] = b
-	}
+	out := slices.Clone(in)
+	slices.Reverse(out)
 	return out
 }
 
@@ -307,15 +306,17 @@ type emulator struct {
 // send writes one frame to the connected client, if there is one. Frames
 // pushed by a timer arrive between whatever the client is asking about, which
 // is exactly how a radio behaves.
-func (e *emulator) send(f frame) {
+func (e *emulator) send(f frame) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.conn == nil {
-		return
+		return nil
 	}
 	if _, err := e.conn.Write(f.encode()); err != nil {
 		log.Printf("coordinator: write: %v", err)
+		return err
 	}
+	return nil
 }
 
 // announce tells zigbee2mqtt a device is present. It produces a real
@@ -415,6 +416,9 @@ func (e *emulator) handle(f frame) []frame {
 		return []frame{{typeSRSP, subSYS, 4, reversed(e.net.ieee)}}
 
 	case f.sub == subSYS && f.cmd == 19: // osalNvLength
+		if len(f.data) < 2 {
+			return nil
+		}
 		id := binary.LittleEndian.Uint16(f.data)
 		d := make([]byte, 2)
 		// An item this coordinator does not carry answers length 0, which
@@ -424,6 +428,9 @@ func (e *emulator) handle(f frame) []frame {
 		return []frame{{typeSRSP, subSYS, 19, d}}
 
 	case f.sub == subSYS && f.cmd == 28: // osalNvReadExt
+		if len(f.data) < 4 {
+			return nil
+		}
 		id := binary.LittleEndian.Uint16(f.data[0:2])
 		off := binary.LittleEndian.Uint16(f.data[2:4])
 		item := e.nv[id]
@@ -479,6 +486,9 @@ func (e *emulator) handle(f frame) []frame {
 		}
 
 	case f.sub == subZDO && f.cmd == 4: // simpleDescReq
+		if len(f.data) < 5 {
+			return nil
+		}
 		// dstaddr, then the address of interest, then the endpoint asked for.
 		want := f.data[4]
 		var found *endpoint
@@ -529,6 +539,9 @@ func (e *emulator) handle(f frame) []frame {
 		return []frame{{typeSRSP, subZDO, 69, []byte{0x00}}}
 
 	case f.sub == subZDO && f.cmd == 33, f.sub == subZDO && f.cmd == 34: // bindReq, unbindReq
+		if len(f.data) < 2 {
+			return nil
+		}
 		// A device's converter binds its clusters to the coordinator so the
 		// device knows where to send reports. These devices report anyway -
 		// this emulator pushes on a timer rather than being asked - so the
@@ -546,6 +559,9 @@ func (e *emulator) handle(f frame) []frame {
 		}
 
 	case f.sub == subZDO && f.cmd == 74: // extFindGroup
+		if len(f.data) < 3 {
+			return nil
+		}
 		// A coordinator that is already commissioned already carries the
 		// green-power group, so this reports it found. Answering "not found"
 		// instead is equally valid and costs one extAddGroup.
@@ -661,8 +677,7 @@ func (e *emulator) serve(c net.Conn) {
 			return
 		}
 		for _, out := range e.handle(f) {
-			if _, err := c.Write(out.encode()); err != nil {
-				log.Printf("coordinator: write: %v", err)
+			if err := e.send(out); err != nil {
 				return
 			}
 		}
@@ -674,13 +689,9 @@ func parseHex(s string, want int, what string) []byte {
 	if len(s) != want*2 {
 		log.Fatalf("%s must be %d bytes as hex, got %q", what, want, s)
 	}
-	out := make([]byte, want)
-	for i := range out {
-		v, err := strconv.ParseUint(s[i*2:i*2+2], 16, 8)
-		if err != nil {
-			log.Fatalf("%s: %v", what, err)
-		}
-		out[i] = byte(v)
+	out, err := hex.DecodeString(s)
+	if err != nil {
+		log.Fatalf("%s: %v", what, err)
 	}
 	return out
 }
@@ -710,17 +721,32 @@ func main() {
 	}
 	log.Printf("emulated Z-Stack coordinator on %s", l.Addr())
 	log.Printf("  pan_id 0x%04x  ext_pan_id %x  channel %d", n.panID, n.extendedPanID, n.channel)
-	log.Printf("  zigbee2mqtt must carry the same three, or it will try to commission a new network")
-	if os.Getenv("ZBEMU_READY_FILE") != "" {
-		_ = os.WriteFile(os.Getenv("ZBEMU_READY_FILE"), []byte("ready\n"), 0o644)
+	log.Printf("  zigbee2mqtt must carry the same pan_id, ext_pan_id, channel and network_key, or it will try to commission a new network")
+	if path := os.Getenv("ZBEMU_READY_FILE"); path != "" {
+		if err := os.WriteFile(path, []byte("ready\n"), 0o644); err != nil {
+			log.Fatalf("ready file: %v", err)
+		}
 	}
 	go e.run()
 
+	var previous net.Conn
+	var served chan struct{}
 	for {
 		c, err := l.Accept()
 		if err != nil {
 			log.Fatalf("accept: %v", err)
 		}
-		go e.serve(c)
+		// End the old command loop before handing shared emulator state to
+		// its replacement. Only one client can issue commands at a time.
+		if previous != nil {
+			previous.Close()
+			<-served
+		}
+		previous = c
+		served = make(chan struct{})
+		go func() {
+			e.serve(c)
+			close(served)
+		}()
 	}
 }

@@ -4,12 +4,12 @@ This is the grep-mode retrieval: no vectors, no chunking, no store to build.
 The corpus is a set of small files totalling under half a megabyte, and
 its vocabulary is precise - a numbered rule, a heading, a configuration key.
 Exact-term search over the files answers the questions dense embedding kept
-missing ("can two workers get the same job" is invariant 4, whose words the
+missing ("can the core block on the disk" is R2, whose words the
 question does not share) and reads whole sections rather than fragments, so a
 rule and the failure it prevents are never handed over in halves.
 
 **Every result carries a heading-path citation**, in the same shape the
-vector path emits - `docs/invariants.md › Queue correctness › invariant 4` -
+vector path emits - `docs/design.md › Sagüin design › Rules › R2` -
 so an answer's references mean the same thing however it was retrieved, and
 the question set scores both paths against one another fairly.
 
@@ -38,10 +38,11 @@ MAX_MATCHES = 90
 MAX_READ_CHARS = 20000
 
 # **The budget is spread across the files, not spent on the first one.** A
-# common word - "queue", "default", "two" - matches the README and RFC 0002
-# scores of times before the walk reaches the invariants, and a single global
-# cap fills entirely from those two and answers "nothing in the invariants",
-# which is where the answer to "can two workers get the same job" actually is.
+# common word - "queue", "default", "two" - matches the README and the
+# design scores of times before the walk reaches config.md, and a single
+# global cap fills entirely from those two and answers "nothing in the
+# configuration", which is where the answer to "what is a key's default"
+# actually is.
 # Capping each file's share keeps the smaller documents visible however loud
 # the large ones are, which is the whole point of searching all of them.
 MAX_PER_FILE = 12
@@ -72,9 +73,9 @@ def _outline(rel: str, text: str) -> list[list[str]]:
     takes, for the same reason: these documents are full of configuration,
     and a comment line is not a section.
 
-    For the invariants file a numbered rule adds its own step to the path, so
-    a line inside rule 4 cites `… › Queue correctness › invariant 4`, which
-    is the unit a reader means by "why is that refused". A new heading resets
+    For the design a numbered rule adds its own step to the path, so a line
+    inside rule R2 cites `… › Rules › R2`, which is the unit a reader means
+    by "why does the core never wait". A new heading resets
     the rule, because the next section's text belongs to no rule at all.
 
     A YAML document has no headings at all - every `#` in it is a comment,
@@ -126,7 +127,7 @@ def _outline(rel: str, text: str) -> list[list[str]]:
 
 def _compose(stack: list[tuple[int, str]], inv: str | None) -> list[str]:
     path = [title for _, title in stack]
-    return path + [f"invariant {inv}"] if inv is not None else path
+    return path + [inv] if inv is not None else path
 
 
 def _citation(rel: str, heading_path: list[str]) -> str:
@@ -241,7 +242,7 @@ def read(
     Line numbers are 1-based and inclusive, the way `grep` reports them, so
     the model can read straight around a match it just found. The citation is
     the heading path at the first line read, which for a rule in the
-    invariants file is that rule's number.
+    design is that rule's name.
     """
     known = _known(root)
     if path not in known:

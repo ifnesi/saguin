@@ -17,15 +17,18 @@ The user's instructions take precedence over this skill. If they ask for work be
 - Do not use `git` or `gh`. Answer from files as they currently exist.
 - Do not run commands that change tracked files. Put any approved probe or draft configuration in a temporary directory.
 - Source claims from the documented corpus. You may inspect implementation or tests only to check whether documentation agrees with the broker. Go source alone does not support an operator-facing answer; if code and docs disagree, state the discrepancy and stop rather than fixing it.
-- Do not substitute MQTT specifications, other brokers, or general expectations for saguin documentation.
+- Do not substitute memory of MQTT, other brokers, or general expectations for saguin documentation. The MQTT standards kept in `docs/mqtt/` are part of the corpus for what MQTT requires; where the design states a departure or a choice (R7, "Choices MQTT leaves open"), the design wins.
 
 ## Documentation corpus
 
-- `README.md`: broker overview; RFCs contain the details.
-- `docs/invariants.md`: numbered behavioral rules.
-- `docs/rfcs/0001-*.md` through `docs/rfcs/0005-*.md`: scope, configuration, delivery, storage, and operations.
-- `examples/`: annotated `saguin.yaml`, ACL examples, demonstrations, and channel/storage fragments.
-- `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, and `LICENSE`: reporting, contributing, releases, and licensing.
+- `README.md`: broker overview; the design contains the details.
+- `docs/design.md`: the single source of truth. Rules R1 to R9 under "Rules", then Words, Execution, Channels, Store, `$saguin` topics, Bridges, Access and reload, Operations, Flows (CONNECT, PUBLISH, SUBSCRIBE, Delivery, Restart and others) and Choices MQTT leaves open.
+- `docs/config.md`: every configuration key, its default and meaning, and the keys it refuses with their replacements.
+- `docs/metrics.md`: every `/metrics` series and its labels.
+- `docs/storage.md`: every database table, and tuning.
+- `docs/mqtt/mqtt-v5.md` and `docs/mqtt/mqtt-v3.1.1.md`: the MQTT 5.0 and 3.1.1 (Plus Errata 01) standards.
+- `examples/`: `README.md`, annotated `saguin.yaml`, ACL examples, `starting-points/`, demonstrations, and certificate/channel/storage fragments in `support/`.
+- `CONTRIBUTING.md`, `CHANGELOG.md`, and `LICENSE`: contributing, releases, and licensing.
 
 Do not treat assistant working files, project-management systems, or repository history as product documentation. `docs/saguin-agent/` implements the same grounded-or-refused documentation job for users without a checkout; keep local answers consistent with it.
 
@@ -36,44 +39,40 @@ For every material claim, read supporting text during the current session. Do no
 Start by counting matches across the corpus, then locate relevant sections and read each section in context. Prefer `rg`; for example:
 
 ```sh
-rg -n -i 'retained' README.md docs/invariants.md docs/rfcs examples | wc -l
-rg -n '^#' docs/rfcs/0003-delivery-semantics.md
-sed -n '436,520p' docs/rfcs/0003-delivery-semantics.md
+rg -n -i 'retained' README.md docs/design.md docs/config.md docs/metrics.md docs/storage.md examples | wc -l
+rg -n '^#' docs/design.md
+sed -n '2399,2656p' docs/design.md
 ```
 
-Do not read an entire large RFC when targeted retrieval will answer the question. Do not conclude from truncated output such as `head`. When checking whether something is mentioned everywhere, use complete counts and results.
+Do not read all of `docs/design.md` or a standard when targeted retrieval will answer the question. Do not conclude from truncated output such as `head`. When checking whether something is mentioned everywhere, use complete counts and results.
 
-The invariant numbers are embedded in bold rule headings rather than phrases such as "invariant 4". Search for words from the rule or read the relevant heading section when a number-based search is empty.
+The design's rules R1 to R9 are bold-led bullets (`- **R4. Stored before acknowledged.**`), each naming the sections that define it, and the design cites them as `[R4](#rules)` throughout. Search for words from the behavior rather than the rule's number, and read both the rule and the section it points to.
 
-Read whole relevant sections, including adjacent constraints and failure cases. If an answer depends on channel type, storage provider, clean versus unclean shutdown, worker count, or another deployment fact, ask for that fact when necessary or present the genuine cases briefly.
+Read whole relevant sections, including adjacent constraints and failure cases. If an answer depends on channel type, storage mode, clean versus unclean shutdown, worker count, or another deployment fact, ask for that fact when necessary or present the genuine cases briefly.
 
 ## Cite answers
 
-Name the document and human-readable section alongside each claim, such as *RFC 0003, "Retained messages"*, *the invariants, rule 14*, or *the comments in `examples/saguin.yaml`*.
+Name the document and human-readable section alongside each claim, such as *design.md › Delivery*, *design.md, rule R4*, *config.md › `broker.limits`*, or *the comments in `examples/saguin.yaml`*.
 
 Use one pointer per claim, or two when two documents genuinely support it. Prefer document names and section titles over line-number citations. Do not overwhelm a short answer with a longer citation list.
 
 ## When documentation is silent
 
-Say exactly: **"The documentation does not say."** Then state the terms and corpus locations searched and identify the nearest documented behavior, if useful. Do not fill the gap using another broker, the MQTT specification, or an inferred sensible default.
+Say exactly: **"The documentation does not say."** Then state the terms and corpus locations searched and identify the nearest documented behavior, if useful. Do not fill the gap using another broker, memory of MQTT, or an inferred sensible default.
 
-Distinguish absence from an explicit non-goal. If an RFC says saguin deliberately does not support something, answer that it does not and cite the relevant section.
+Distinguish absence from an explicit non-goal. If the documentation says saguin deliberately does not support something (for example, README.md › Deliberate constraints: no clustering), answer that it does not and cite the relevant section.
 
 ## Draft configurations
 
-Start from `examples/saguin.yaml` and the schema in RFC 0002. Verify every proposed key against the configuration fields loaded by the code:
-
-```sh
-rg -o 'yaml:"[a-z0-9_]+' internal/config/*.go | rg -o '"[a-z0-9_]+' | tr -d '"' | sort -u
-```
+Start from `examples/saguin.yaml`, `examples/starting-points/`, and `docs/config.md`, which lists every key. Verify every proposed key against config.md: an unknown key stops startup.
 
 Write drafts only in a temporary directory. Validate a draft before returning it:
 
 ```sh
-./bin/saguin --check-config /tmp/path/to/draft.yaml
+./bin/saguin --check-config /path/to/scratch/draft.yaml
 ```
 
-If referenced certificates, password files, or similar inputs are intentionally unavailable, clearly say validation could not establish those external files. Never invent a configuration key. When a behavior is fixed rather than configurable, cite the fixed behavior instead.
+`--check-config` also opens every file the configuration names. If referenced certificates, password files, or similar inputs are intentionally unavailable, clearly say validation could not establish those external files. Never invent a configuration key. When a behavior is fixed rather than configurable, cite the fixed behavior instead.
 
 ## Runtime probes
 
@@ -84,7 +83,7 @@ For approved probes:
 - Prefer Eclipse Paho (`examples/demo.py`) or an in-process Go client when client behavior could mask the broker. Command-line MQTT tools may normalize packets before sending them; for example, they can clear a retain flag after CONNACK says retained messages are unavailable.
 - Separate sending from collection so a helper does not consume messages while waiting for an acknowledgement.
 - Report the broker's actual MQTT reason code rather than only a client library's label.
-- Read RFC 0005 before testing `/metrics`; requests inside `min_scrape_interval` may return the previous catalogue.
+- Read `docs/metrics.md` before testing `/metrics`; a value only the store knows is re-read every `min_scrape_interval`, so a scrape sooner returns the values held from the last read.
 - `make demo` is the quickest general demonstration using `examples/saguin.yaml`.
 
 Report only the behavior relevant to the question and the evidence needed to establish it.

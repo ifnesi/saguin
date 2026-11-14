@@ -3,15 +3,15 @@
 #
 #   docker compose up
 #
-# Thirteen containers on one network. The four with a page worth opening:
+# Fifteen services on one network. The three with a page worth opening:
 #
-#   viewer            http://localhost:4000   the MQTT side: a topic tree, decoded
 #   grafana           http://localhost:3000   saguin's own metrics, every one
 #   control-center    http://localhost:9021   the Kafka side: topics and messages
 #   prometheus        http://localhost:9094   the series behind the dashboard
 #
 #   saguin            MQTT 5 broker, anonymous, no TLS         localhost:1883
 #                     operations listener, /metrics behind Basic  localhost:9090
+#   saguin-health     asks saguin's /health for the services that wait on it
 #   kafka             single-node KRaft Kafka, no auth or TLS  localhost:9092
 #   mosquitto         the upstream saguin's bridge reads from  localhost:1884
 #   iot-datagen       Bento: simulated sensors -> saguin
@@ -28,10 +28,10 @@
 # Grafana draws from. Merging them would mean rewriting a generated config
 # that the Confluent image owns.
 #
-# **saguin and the viewer are their published images; two are built here**,
-# and each says why on its service: no published Bento image has the
-# `mqtt_v5` input and output this stack needs, and the traffic generator is
-# written for this demonstration.
+# **Two images are built here rather than pulled**, and each says why on its
+# service: no published Bento image has the `mqtt_v5` input and output this
+# stack needs, and the traffic generator is written for this demonstration.
+# saguin and the viewer are their published images, pinned to 0.2.0.
 #
 # The `z` on each bind mount relabels the mounted files for SELinux. It is
 # needed on Fedora, RHEL and their relatives, and ignored everywhere else.
@@ -59,10 +59,8 @@ x-logging: &logging
 x-bento: &bento
   image: bento-connectors-bento:local
   build:
-    # The repository root, because one Dockerfile builds both images here
-    # and the traffic generator is copied out of this checkout.
-    context: ../..
-    dockerfile: examples/bento-connectors/Dockerfile
+    # This directory, where the one Dockerfile builds both local images.
+    context: .
     target: bento
   working_dir: /connectors
   volumes:
@@ -73,10 +71,10 @@ name: bento-connectors
 services:
   saguin:
     <<: *logging
-    # The broker, as its published image. It has no shell and no wget, so
-    # there is no health check inside it: the clients below start once it
-    # has started, and each reconnects until it answers.
-    image: ghcr.io/ifnesi/saguin:0.1.0-rc.1
+    # The broker: the published image, a scratch image running as uid 10001,
+    # with no shell. Its default command reads /etc/saguin/saguin.yaml,
+    # mounted below with the password file it names.
+    image: ghcr.io/ifnesi/saguin:0.2.0
     container_name: bento-saguin
     depends_on:
       # The bridge's upstream. Not a health condition: saguin retries the
@@ -93,17 +91,37 @@ services:
       - ./saguin.yaml:/etc/saguin/saguin.yaml:ro,z
       - ./operations.passwd:/etc/saguin/operations.passwd:ro,z
       # **The database, on a volume rather than in the container's own
-      # layer.** Without this, recreating the container - which is what a
-      # new image or `--force-recreate` does - takes every record,
-      # every stored consumer position and every `latest` value with it. The
-      # water stations publish their coordinates exactly once, at startup,
-      # so a broker that came back empty served none of them ever again
-      # while reporting itself perfectly healthy: the one failure a
+      # layer.** Without this, recreating the container - which is what
+      # `up` does after any change to its image or settings - takes every
+      # record, every stored consumer position and every `latest` value with
+      # it. The water stations publish their coordinates exactly once, at
+      # startup, so a broker that came back empty served none of them ever
+      # again while reporting itself perfectly healthy: the one failure a
       # demonstration of a *durable* broker must not have.
       #
       # `docker compose down -v` is the reset. `down` on its own now keeps
       # the data, which is the point of it.
       - saguin-data:/var/lib/saguin
+
+  saguin-health:
+    <<: *logging
+    # saguin's health check, from beside it. The broker image has no shell
+    # and no HTTP client to ask its own operations listener, so this
+    # container asks it over the compose network. /health answers 200 once
+    # the broker is accepting connections, which is what the pipelines, the
+    # traffic generator and the viewer below wait for.
+    image: docker.io/library/busybox:1.37.0
+    container_name: bento-saguin-health
+    depends_on:
+      - saguin
+    # tini as PID 1, so `docker compose stop` ends the sleep at once.
+    init: true
+    command: ["sleep", "2147483647"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://saguin:9090/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
 
   kafka:
     <<: *logging
@@ -117,6 +135,8 @@ services:
     ports:
       - "9092:9092"
       - "9101:9101"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
@@ -138,7 +158,7 @@ services:
       KAFKA_LISTENERS: 'PLAINTEXT://kafka:29092,CONTROLLER://kafka:29093,PLAINTEXT_HOST://0.0.0.0:9092'
       KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+      KAFKA_LOG_DIRS: '/var/lib/kafka/data'
       CONFLUENT_METRICS_ENABLE: 'true'
       CONFLUENT_SUPPORT_CUSTOMER_ID: 'anonymous'
       # Replace CLUSTER_ID with a unique base64 UUID using "bin/kafka-storage.sh random-uuid"
@@ -330,8 +350,8 @@ services:
       # a `latest` channel, which keeps the current value of every topic for
       # whoever subscribes next - so the order these two start in stopped
       # mattering.
-      saguin:
-        condition: service_started
+      saguin-health:
+        condition: service_healthy
 
   mqtt2kafka:
     <<: [*bento, *logging]
@@ -344,8 +364,8 @@ services:
       MQTT_URLS: tcp://saguin:1883
       KAFKA_SEED_BROKERS: kafka:29092
     depends_on:
-      saguin:
-        condition: service_started
+      saguin-health:
+        condition: service_healthy
       kafka:
         condition: service_healthy
       # **Before the first produce, or there is nothing to create.** Kafka
@@ -362,16 +382,6 @@ services:
       interval: 2s
       timeout: 5s
       retries: 15
-
-  # --- What was examples/monitoring, folded in ----------------------------
-  #
-  # These four used to be a stack of their own with a saguin of their own,
-  # and the reason they are here is not tidiness. That stack drove itself
-  # with traffic.py alone - a generator shaped to light up metrics, which is
-  # the weakest possible evidence that the metrics mean anything. The two
-  # Bento pipelines above are a load nobody tuned to look good on a
-  # dashboard, and it is the case the catalogue was designed for: a consumer
-  # whose position actually lags, provider bytes that actually grow.
 
   prometheus:
     <<: *logging
@@ -434,68 +444,34 @@ services:
 
   viewer:
     <<: *logging
-    # **`ifnesi/saguin-viewer`, not a page written for this stack.** The
-    # MQTT half of the pipeline as a topic tree, a live feed of everything
-    # arriving, a publish form, a replay control and a dashboard of the
-    # numbers the broker keeps about itself. Not MQTT Explorer, which this
-    # stack used to ship: it asks for MQTT 3.1.1 - refused outright when this stack was built,
-    # admitted today, and no more use either way, because a 3.1.1 client is
-    # handed no user properties and this stack's offsets and `schema`
-    # pointers all live there.
-    #
-    # **The readings decode here**, through saguin's own schema registry: the
-    # `schema` property on each record names a topic, the viewer point-reads
-    # it and reads the bytes with what it finds. The bytes stay on screen
-    # beside the decoded card. Control Center shows the decoded form on the
-    # Kafka side, one step downstream.
-    #
-    # It connects as a durable consumer of its own, which is what gives it a
-    # stored position for the replay control to move. That position is its
-    # own: replaying a channel here does not disturb the bridge feeding
-    # Kafka. It never subscribes to a queue, and cannot: the broker leaves a
-    # queue's records out of any filter that merely crosses one.
-    #
-    # The viewer's published image: it lives in `ifnesi/saguin-viewer`, and
-    # this stack is one deployment that points it at a broker.
-    image: ghcr.io/ifnesi/saguin-viewer:latest
+    # ifnesi/saguin-viewer, a client of any Sagüin: a topic tree, a live feed
+    # decoded through the schemas channel, a publish form, a replay control,
+    # the sessions, retained values and dead letters, and a dashboard of the
+    # broker's own metrics. The viewer's published image.
+    image: ghcr.io/ifnesi/saguin-viewer:0.2.0
     container_name: bento-viewer
     ports:
       - "4000:8080"
-    # Every setting in the viewer's own saguin-viewer.yaml is
-    # `${VAR:-default}`, so these override the handful this stack needs and
-    # the file supplies the rest.
     environment:
-      # **0.0.0.0 here and only here.** The viewer defaults to loopback,
-      # which is right for an operator running it on their own machine and
-      # wrong inside a container - loopback there is the container, so the
-      # published port would reach nothing.
+      # Loopback inside a container is the container, so the viewer listens
+      # on every address here.
       SAGUIN_VIEWER_LISTEN: "0.0.0.0:8080"
       SAGUIN_MQTT_HOST: saguin
       SAGUIN_MQTT_PORT: "1883"
       SAGUIN_VIEWER_CLIENT_ID: bento-viewer
-      # **The operator credential rather than the scraper's, and the
-      # difference is the demonstration.** `prometheus` is narrowed to
-      # /metrics in operations.passwd, because a scraper's password sits in
-      # a monitoring configuration read by whoever runs monitoring. This
-      # viewer reads the catalogue *and* the routes that answer what the
-      # catalogue cannot - who is behind, what a queue holds, who may
-      # connect - so it needs the wider one, which is what having two is for.
+      # The operator's credential, not the scraper's: the viewer reads the
+      # inspection routes as well as /metrics.
       SAGUIN_OPS_URL: "http://saguin:9090"
       SAGUIN_OPS_USER: operator
       SAGUIN_OPS_PASSWORD: operator
     depends_on:
-      saguin:
-        condition: service_started
+      saguin-health:
+        condition: service_healthy
     restart: unless-stopped
 
   mosquitto:
     <<: *logging
-    # **The upstream saguin's bridge reads from, and not the broker this
-    # example used to run on.** That one stood in for saguin because Bento
-    # could not speak MQTT 5; it is gone. This one is somebody else's estate
-    # - a broker that has never heard of a channel - which is the only
-    # honest way to show an inbound bridge. Published on 1884 because saguin
-    # has 1883.
+    # Outside MQTT broker, published on 1884; Sagüin reads its fleet topics.
     image: docker.io/library/eclipse-mosquitto:2
     container_name: bento-upstream
     ports:
@@ -513,13 +489,12 @@ services:
     # while the Bento rows carry on, which is worth doing once: it is the
     # difference between the two loads made visible.
     build:
-      context: ../..
-      dockerfile: examples/bento-connectors/Dockerfile
+      context: .
       target: traffic
     container_name: bento-traffic
     depends_on:
-      saguin:
-        condition: service_started
+      saguin-health:
+        condition: service_healthy
       mosquitto:
         condition: service_started
     restart: unless-stopped
@@ -529,3 +504,4 @@ volumes:
   # uid 10001 into the checkout, which is a file the person running this
   # cannot delete without sudo.
   saguin-data:
+  kafka-data:

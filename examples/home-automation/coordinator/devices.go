@@ -168,19 +168,9 @@ func (d *device) drift() {
 		return
 	}
 	d.tempC += (rand.Float64() - 0.5) * 0.4
-	if d.tempC < 14 {
-		d.tempC = 14
-	}
-	if d.tempC > 28 {
-		d.tempC = 28
-	}
+	d.tempC = min(28, max(14, d.tempC))
 	d.humid += (rand.Float64() - 0.5) * 1.5
-	if d.humid < 30 {
-		d.humid = 30
-	}
-	if d.humid > 70 {
-		d.humid = 70
-	}
+	d.humid = min(70, max(30, d.humid))
 	// Batteries go one way. Slowly, and never past a floor, because a demo
 	// left running overnight should not end with every sensor at zero.
 	if d.batt > 20 && rand.Float64() < 0.05 {

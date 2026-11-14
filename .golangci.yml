@@ -1,0 +1,23 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose # Catch unclosed HTTP response bodies that leak connections.
+    - dupl # Catch copied logic in broker code and tests so it can be shared.
+    - errorlint # Catch error comparisons that fail when store or network errors are wrapped.
+    - gocritic # Catch suspicious logic and wasteful operations in the broker.
+    - intrange # Catch counting loops that Go's integer range expresses directly.
+    - modernize # Catch older patterns with simpler standard Go replacements.
+    - nilerr # Catch failure paths that accidentally return a nil error.
+    - perfsprint # Catch formatting calls that allocate more than plain conversions.
+    - prealloc # Catch slice growth that can avoid repeated allocations.
+    - revive # Catch Go style and API mistakes that make broker code harder to read.
+    - unconvert # Catch redundant type conversions that obscure packet and store logic.
+    - unparam # Catch unused or always identical arguments that complicate broker APIs.
+    - usestdlibvars # Catch literals that duplicate named standard library constants.
+  settings:
+    dupl: # Catch substantial copies while allowing naturally similar test tables.
+      threshold: 100
+    gocritic: # Run every check for suspicious logic and wasteful broker operations.
+      enable-all: true

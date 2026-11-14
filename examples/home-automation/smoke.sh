@@ -7,24 +7,20 @@
 # losing one to a typo fails the run rather than shortening it.
 set -uo pipefail
 
+cd "$(dirname "$0")"
 COMPOSE=${COMPOSE:-docker compose}
 HOST=${HOST:-127.0.0.1}
 PORT=${PORT:-1883}
 OPS=${OPS:-http://127.0.0.1:9091}
-VIEWER=${VIEWER:-http://127.0.0.1:4001}
 HUB_USER=zigbee2mqtt-hub-1
 HUB_PASS=hub-password-change-me
-# Its own credential, NOT the viewer container's. acl.yaml binds a viewer
-# credential to the client id that is its name, so two clients under one name
-# would evict each other - and the symptom is a check that intermittently
-# sees nothing, which reads as a broken broker. `viewer-*` matches the same
-# role, so this reads exactly what the viewer reads.
-VIEW_USER=viewer-smoke
-VIEW_PASS=smoke-password-change-me
+# Separate MQTT reader identities keep the checks from evicting each other.
+READ_USER=reader-smoke
+READ_PASS=smoke-password-change-me
 # The radio gateway's credential, used only to prove what it may NOT do.
 RF_USER=rtl433-hub-1
 RF_PASS=rf-password-change-me
-EXPECTED_CHECKS=32
+EXPECTED_CHECKS=31
 passed=0
 failed=0
 ran=0
@@ -42,11 +38,13 @@ need() {
 need mosquitto_pub
 need mosquitto_sub
 
-newest() { # topic -> the LAST record, which on an append channel is the
+newest() { # topic [timeout seconds] -> the LAST record, which on an append channel is the
            # current one. Taking the first would take the oldest, which is
            # how a plug that was on read as off for an hour.
-  timeout 14 mosquitto_sub -h "$HOST" -p "$PORT" -V 5 \
-    -i "$VIEW_USER" -u "$VIEW_USER" -P "$VIEW_PASS" \
+  local budget="${2:-14}"
+  [ "$budget" -gt 14 ] && budget=14
+  timeout "$budget" mosquitto_sub -h "$HOST" -p "$PORT" -V 5 \
+    -i "$READ_USER" -u "$READ_USER" -P "$READ_PASS" \
     -t "$1" -v -W 15 2>/dev/null | tail -1
 }
 
@@ -60,19 +58,42 @@ rfsub() { # the same, with a window the radio half needs
   # sends a round of three every thirty seconds, so one arrives every ten,
   # and this window is four times that.
   timeout 60 mosquitto_sub -h "$HOST" -p "$PORT" -V 5 \
-    -i "$VIEW_USER" -u "$VIEW_USER" -P "$VIEW_PASS" \
+    -i "$READ_USER" -u "$READ_USER" -P "$READ_PASS" \
     -t "$1" -v -W 40 -C "${2:-1}" 2>/dev/null
 }
 
-sub() { # topic [count] -> "<topic> <payload>" lines, or empty
+sub() { # topic [count] [timeout seconds] -> "<topic> <payload>" lines, or empty
   # -v, so each line carries its topic. Without it the payload arrives alone
   # and any check counting topics matches nothing while every check that only
   # asks "was there output" still passes - which is a check reporting on work
   # it did not do.
-  timeout 24 mosquitto_sub -h "$HOST" -p "$PORT" -V 5 \
-    -i "$VIEW_USER" -u "$VIEW_USER" -P "$VIEW_PASS" \
+  local budget="${3:-24}"
+  [ "$budget" -gt 24 ] && budget=24
+  timeout "$budget" mosquitto_sub -h "$HOST" -p "$PORT" -V 5 \
+    -i "$READ_USER" -u "$READ_USER" -P "$READ_PASS" \
     -t "$1" -v -W 4 -C "${2:-1}" 2>/dev/null
 }
+
+# A current value can arrive immediately and still be the previous state.
+# Poll until the wanted value or a deadline, passing the time left to each
+# read so a slow subscription cannot extend the thirty-second budget.
+wait_value() { # wanted reader [reader arguments]
+  local wanted="$1" deadline remaining value=""
+  shift
+  deadline=$(( $(date +%s) + 30 ))
+  while :; do
+    remaining=$(( deadline - $(date +%s) ))
+    [ "$remaining" -gt 0 ] || break
+    value=$("$@" "$remaining")
+    [ "$value" = "$wanted" ] && break
+    [ "$(date +%s)" -lt "$deadline" ] || break
+    sleep 0.5
+  done
+  printf '%s\n' "$value"
+}
+
+availability() { sub 'rtl433/availability' 1 "$1" | awk '{print $2}'; }
+plug_state() { newest 'zigbee2mqtt/kitchen-plug' "$1" | grep -oE '"state":"[A-Z]+"'; }
 
 echo "waiting for the stack"
 for _ in $(seq 1 60); do
@@ -88,7 +109,7 @@ curl -fsS "$OPS/metrics" >/dev/null 2>&1 && bad "/metrics without credentials is
 
 echo
 echo "authentication and identity"
-mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "$VIEW_USER" -u "$VIEW_USER" -P "wrong-password" \
+mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "$READ_USER" -u "$READ_USER" -P "wrong-password" \
   -t 'zigbee2mqtt/living-room-sensor/set' -m 'x' >/dev/null 2>&1 \
   && bad "a wrong password is refused" \
   || ok "a wrong password is refused"
@@ -96,20 +117,20 @@ mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "$VIEW_USER" -u "$VIEW_USER" -P
 # The credential is bound to its client id, so the same password from another
 # client id must not work. This is the check that would catch `client_ids`
 # being dropped from acl.yaml, which nothing else here would notice.
-mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "borrowed-id" -u "$VIEW_USER" -P "$VIEW_PASS" \
+mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "borrowed-id" -u "$READ_USER" -P "$READ_PASS" \
   -t 'zigbee2mqtt/living-room-sensor/set' -m 'x' >/dev/null 2>&1 \
   && bad "the credential is bound to its client id" \
   || ok "the credential is bound to its client id"
 
 echo
 echo "what each principal may do"
-out=$(mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "$VIEW_USER" -u "$VIEW_USER" -P "$VIEW_PASS" \
+out=$(mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "$READ_USER" -u "$READ_USER" -P "$READ_PASS" \
   -t 'zigbee2mqtt/living-room-sensor' -m '{"temperature":99}' -d 2>&1)
-echo "$out" | grep -q "RC:135" && ok "a viewer may NOT write a device topic (0x87)" || bad "a viewer may NOT write a device topic (0x87)" "$out"
+echo "$out" | grep -q "RC:135" && ok "a reader may NOT write a device topic (0x87)" || bad "a reader may NOT write a device topic (0x87)" "$out"
 
-out=$(mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "$VIEW_USER" -u "$VIEW_USER" -P "$VIEW_PASS" \
+out=$(mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "$READ_USER" -u "$READ_USER" -P "$READ_PASS" \
   -t 'zigbee2mqtt/living-room-sensor/set' -m '{"state":"ON"}' -d 2>&1)
-echo "$out" | grep -q "RC:0" && ok "a viewer MAY write a command topic" || bad "a viewer MAY write a command topic" "$out"
+echo "$out" | grep -q "RC:0" && ok "a reader MAY write a command topic" || bad "a reader MAY write a command topic" "$out"
 
 echo
 echo "zigbee2mqtt is really running"
@@ -130,7 +151,7 @@ echo "the channels"
 # republishes the merged state after each. So a few seconds of live traffic is
 # a handful; a `floor` replay on a channel that has been filling is dozens.
 cold=$(timeout 14 mosquitto_sub -h "$HOST" -p "$PORT" -V 5 \
-  -i viewer-cold -u viewer-cold -P cold-password-change-me \
+  -i reader-cold -u reader-cold -P cold-password-change-me \
   -t 'zigbee2mqtt/living-room-sensor' -v -W 8 2>/dev/null | grep -c '^zigbee2mqtt/')
 [ "$cold" -le 12 ] && ok "a first-time reader is served live, not the backlog ($cold in 8s)" \
   || bad "a first-time reader is served live, not the backlog" "saw $cold, which looks like a replay"
@@ -149,7 +170,7 @@ cold=$(timeout 14 mosquitto_sub -h "$HOST" -p "$PORT" -V 5 \
 # one a moment later races, and it made the FIRST run for a fresh identity
 # fail while the second passed. It is also unnecessary - the read below
 # advances the position wherever it starts, so a leftover one changes nothing.
-RESUME_USER=viewer-resume
+RESUME_USER=reader-resume
 RESUME_PASS=resume-password-change-me
 
 # A durable session, held long enough to take a position.
@@ -165,7 +186,7 @@ missed=$(timeout 14 mosquitto_sub -h "$HOST" -p "$PORT" -V 5 -c -x 300 \
 # Long enough for every device to report at least once, since a cold reader
 # is served live traffic rather than what the channel already holds.
 n=$(timeout 26 mosquitto_sub -h "$HOST" -p "$PORT" -V 5 \
-  -i viewer-cold -u viewer-cold -P cold-password-change-me \
+  -i reader-cold -u reader-cold -P cold-password-change-me \
   -t 'zigbee2mqtt/+' -v -W 20 2>/dev/null | grep -oE '^zigbee2mqtt/[a-z-]+' | sort -u | wc -l)
 [ "$n" -ge 3 ] && ok "every device reports into the tree ($n)" || bad "every device reports into the tree" "saw $n"
 
@@ -206,7 +227,7 @@ before=$(newest 'zigbee2mqtt/living-room-sensor')
 # check afterwards is about the same session rather than about whatever
 # reconnected in the meantime. The resume check above left this one.
 held_before=$(curl -fsS -u operator:operator-password-change-me "$OPS/v1/operations/sessions" 2>/dev/null \
-  | grep -c '"client_id":"viewer-resume"')
+  | grep -c '"client_id":"reader-resume"')
 $COMPOSE restart saguin >/dev/null 2>&1
 for _ in $(seq 1 30); do curl -fsS -u operator:operator-password-change-me "$OPS/health" >/dev/null 2>&1 && break; sleep 2; done
 after=$(newest 'zigbee2mqtt/living-room-sensor')
@@ -225,7 +246,7 @@ restored=$(curl -fsS -u operator:operator-password-change-me "$OPS/metrics" 2>/d
 # The same session, by name, on both sides of the restart - which is what
 # "put back" has to mean for the device that owns it.
 held_after=$(curl -fsS -u operator:operator-password-change-me "$OPS/v1/operations/sessions" 2>/dev/null \
-  | grep -c '"client_id":"viewer-resume"')
+  | grep -c '"client_id":"reader-resume"')
 [ "$held_before" -ge 1 ] && [ "$held_after" -ge 1 ] \
   && ok "a held session is still the broker's after the restart" \
   || bad "a held session is still the broker's after the restart" \
@@ -239,17 +260,13 @@ echo "the command path, end to end"
 sleep 5
 before=$(newest 'zigbee2mqtt/kitchen-plug' | grep -oE '"state":"[A-Z]+"')
 want=ON; [ "$before" = '"state":"ON"' ] && want=OFF
-mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "$VIEW_USER" -u "$VIEW_USER" -P "$VIEW_PASS" \
+mosquitto_pub -h "$HOST" -p "$PORT" -V 5 -q 1 -i "$READ_USER" -u "$READ_USER" -P "$READ_PASS" \
   -t 'zigbee2mqtt/kitchen-plug/set' -m "{\"state\":\"$want\"}" >/dev/null 2>&1
 # Poll rather than sleep a fixed time. The device reports on its own timer and
-# the viewer is watching the same topic, so a single read a few seconds later
+# the reader is watching the same topic, so a single read a few seconds later
 # is a race - and a race in a check is worse than no check, because it fails
 # on somebody else's machine and gets ignored.
-after=""
-for _ in $(seq 1 8); do
-  after=$(newest 'zigbee2mqtt/kitchen-plug' | grep -oE '"state":"[A-Z]+"')
-  [ "$after" = "\"state\":\"$want\"" ] && break
-done
+after=$(wait_value "\"state\":\"$want\"" plug_state)
 [ "$after" = "\"state\":\"$want\"" ] \
   && ok "a command reaches the device and its new state comes back ($before -> $after)" \
   || bad "a command reaches the device and its new state comes back" "wanted $want, before=$before after=$after"
@@ -266,7 +283,7 @@ echo "the radio half: rtl_433, a second gateway that shares nothing with the fir
 
 # Three sensors, not one. A single emulated device would pass every other
 # check here while proving nothing about a gateway carrying a household.
-n=$(timeout 45 mosquitto_sub -h "$HOST" -p "$PORT" -V 5 -i "$VIEW_USER" -u "$VIEW_USER" -P "$VIEW_PASS" \
+n=$(timeout 45 mosquitto_sub -h "$HOST" -p "$PORT" -V 5 -i "$READ_USER" -u "$READ_USER" -P "$READ_PASS" \
       -t 'rtl433/devices/+/+/+/id' -v -W 45 2>/dev/null | awk '{print $2}' | sort -u | wc -l)
 [ "$n" -eq 3 ] && ok "all three radio sensors are heard ($n)" \
                || bad "all three radio sensors are heard" "distinct ids seen: $n, wanted 3"
@@ -326,14 +343,7 @@ echo "$route" | grep -qi 'no channel\|broadcast' \
 #
 # Last, because it takes the radio gateway down and back up.
 $COMPOSE kill rtl433 >/dev/null 2>&1
-state=""
-# A pause between reads: each one returns the stored value at once, so
-# without it every attempt can land before the change it is waiting for.
-for _ in $(seq 1 8); do
-  state=$(sub 'rtl433/availability' | awk '{print $2}')
-  [ "$state" = "offline" ] && break
-  sleep 1
-done
+state=$(wait_value offline availability)
 [ "$state" = "offline" ] \
   && ok "a gateway killed without a DISCONNECT is marked offline by its Will" \
   || bad "a gateway killed without a DISCONNECT is marked offline by its Will" \
@@ -343,42 +353,11 @@ done
 # latest channel replacing the Will rather than keeping it beside the live
 # value.
 $COMPOSE start rtl433 >/dev/null 2>&1
-state=""
-for _ in $(seq 1 10); do
-  state=$(sub 'rtl433/availability' | awk '{print $2}')
-  [ "$state" = "online" ] && break
-  sleep 1
-done
+state=$(wait_value online availability)
 [ "$state" = "online" ] \
   && ok "and online again when the gateway comes back" \
   || bad "and online again when the gateway comes back" \
         "availability read '$state', wanted 'online'"
-
-# The viewer's answers travel over its own `viewer-reply/<id>` subscription,
-# and an acl_file that forgets the prefix loses every point read and seek
-# reply silently: the page degrades to working without them, and the 31
-# checks above once passed over exactly that. /api/state has carried
-# granted:false since the day it was written; this is the reader it lacked.
-# The count is printed so a viewer that answered nothing cannot pass as one
-# with nothing refused.
-subs=$(curl -fsS "$VIEWER/api/state" 2>/dev/null | python3 -c '
-import json, sys
-d = json.load(sys.stdin)
-subs = d.get("subscriptions") or []
-refused = [s["filter"] for s in subs if not s.get("granted")]
-print(str(len(subs)) + "|" + " ".join(refused))
-' 2>/dev/null)
-count=${subs%%|*}
-refused=${subs#*|}
-if [ -z "$subs" ] || [ "${count:-0}" -eq 0 ]; then
-  bad "every viewer subscription is granted, the reply topic included" \
-      "could not read subscriptions from $VIEWER/api/state, so nothing was examined"
-elif [ -n "$refused" ]; then
-  bad "every viewer subscription is granted, the reply topic included" \
-      "refused: $refused - an acl_file must grant viewer-reply/+ read"
-else
-  ok "every viewer subscription is granted, the reply topic included ($count examined)"
-fi
 
 echo
 echo "-------------------------------------------------"

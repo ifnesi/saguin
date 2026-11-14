@@ -1,5 +1,15 @@
-# Builds and publishes a release when a version tag is pushed, and on
-# nothing else. CONTRIBUTING.md "Cutting a release" lists the maintainer's steps.
+# Builds and publishes a release when a version tag (v*) is pushed, and on
+# nothing else.
+#
+# The jobs run in order, and each runs only when the one before it passed:
+#
+#   guard    the tag and CHANGELOG.md agree; the release notes are taken out
+#   build    each architecture is built natively, checked and archived
+#   image    the container image is built from those binaries, run, then pushed
+#   release  the GitHub release is created with the notes and the archives
+#
+# Nothing is published before the image has passed its test, so a refused tag
+# leaves no release, no image and no tag in the registry.
 name: release
 
 on:
@@ -7,47 +17,350 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: write   # create the GitHub release and upload the archives
-  packages: write   # push the container image to ghcr.io
+# No job gets a permission it does not name below.
+permissions: {}
 
 jobs:
-  release:
+  guard:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          check-latest: true
-
-      # The version is a constant in cmd/saguin/main.go, not a link-time
-      # variable, so nothing can inject the tag. Refuse a tag the binary
-      # does not agree with, and one whose CHANGELOG.md section has no date,
-      # before anything is published.
-      - name: tag agrees with the source
+      # The tag is v followed by a semantic version, which is also what Go
+      # needs to stamp it into the binary as its version. A hyphen marks a
+      # pre-release (v0.3.0-rc.1): it gets no `latest` image and is marked
+      # as a pre-release on GitHub.
+      - name: the tag is a version
+        id: version
         shell: bash
         run: |
           set -euo pipefail
-          want="${GITHUB_REF_NAME#v}"
-          got="$(go run ./cmd/saguin --version | sed -n '1s/^.*Sagüin //p')"
-          if [[ "$got" != "$want" ]]; then
-            echo "tag $GITHUB_REF_NAME needs Version = \"$want\" in cmd/saguin/main.go; the binary says \"$got\"" >&2
+          tag="$GITHUB_REF_NAME"
+          if ! [[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::$tag is not a release tag: they are written v<major>.<minor>.<patch>"
             exit 1
           fi
-          if ! grep -Eq "^## ${want//./\\.} - [0-9]{4}-[0-9]{2}-[0-9]{2}\$" CHANGELOG.md; then
-            echo "CHANGELOG.md has no dated \"## $want - YYYY-MM-DD\" section" >&2
-            exit 1
-          fi
-          # The release notes: that section, up to the next one.
-          awk -v h="## $want - " 'index($0,h)==1{f=1;next} /^## /{f=0} f' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          test -s "$RUNNER_TEMP/notes.md"
+          version="${tag#v}"
+          prerelease=false
+          [[ "$version" == *-* ]] && prerelease=true
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
 
+      # The checkout is the tag's own commit, so the binary built from it
+      # reports the tag and nothing else.
+      - name: the checkout is the tag's commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          want="$(git rev-parse "refs/tags/$GITHUB_REF_NAME^{commit}")"
+          got="$(git rev-parse HEAD)"
+          if [[ "$got" != "$want" ]]; then
+            echo "::error::HEAD is $got, not $GITHUB_REF_NAME's commit $want"
+            exit 1
+          fi
+
+      # Each release has a dated section in CHANGELOG.md, and that section,
+      # up to the next one, is its release notes.
+      - name: CHANGELOG.md has the release's dated section
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          heading="## $VERSION - "
+          if ! grep -Eq "^## ${VERSION//./\\.} - [0-9]{4}-[0-9]{2}-[0-9]{2}\$" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no dated \"## $VERSION - YYYY-MM-DD\" section"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/notes"
+          awk -v h="$heading" 'index($0, h) == 1 { f = 1; next } /^## / { f = 0 } f' \
+            CHANGELOG.md > "$RUNNER_TEMP/notes/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes/notes.md"; then
+            echo "::error::CHANGELOG.md's $VERSION section is empty"
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-notes
+          path: ${{ runner.temp }}/notes/notes.md
+          if-no-files-found: error
+
+  build:
+    needs: guard
+    permissions:
+      contents: read
+    # The binary links SQLite's C code and glibc statically through cgo, so
+    # each architecture is built on a machine of that architecture rather
+    # than cross-compiled. ubuntu-24.04-arm is GitHub's arm64 runner.
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            machine: "Advanced Micro Devices X86-64"
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            machine: "AArch64"
+    runs-on: ${{ matrix.runner }}
+    env:
+      TAG: ${{ needs.guard.outputs.tag }}
+      VERSION: ${{ needs.guard.outputs.version }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      # The full history and its tags, so Go can stamp the tag into the
+      # binary as its version.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      # The Go version go.mod names. No cache: a release is built from
+      # nothing a previous run left behind.
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      # A static link needs glibc's static library, libc.a, which Ubuntu
+      # ships in libc6-dev. It is installed only if the runner lacks it.
+      - name: gcc and a static glibc
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v gcc > /dev/null || ! [[ -f "$(gcc -print-file-name=libc.a)" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends gcc libc6-dev
+          fi
+          gcc --version | head -n 1
+          echo "libc.a: $(gcc -print-file-name=libc.a)"
+
+      # Go appends +dirty to the version of a binary built from a changed
+      # tree. The version check below would refuse it; this names the files.
+      - name: the tree is clean
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$(git status --porcelain)" ]]; then
+            echo "::error::the checkout has changes before the build"
+            git status --porcelain
+            exit 1
+          fi
+
+      - name: make build
+        run: make build
+
+      # The binary is for this architecture, has no program interpreter and
+      # no shared library, and reports the tag as its version: the tag and
+      # the binary agree, or nothing is published.
+      - name: the binary is static and reports the tag
+        shell: bash
+        env:
+          MACHINE: ${{ matrix.machine }}
+        run: |
+          set -euo pipefail
+          machine="$(readelf -hW bin/saguin | sed -n 's/^ *Machine: *//p')"
+          if [[ "$machine" != "$MACHINE" ]]; then
+            echo "::error::bin/saguin is built for $machine, not $MACHINE"
+            exit 1
+          fi
+          if readelf -lW bin/saguin | grep -q 'program interpreter' ||
+             readelf -dW bin/saguin | grep -q '(NEEDED)'; then
+            echo "::error::bin/saguin is dynamically linked"
+            readelf -lW bin/saguin
+            readelf -dW bin/saguin
+            exit 1
+          fi
+          got="$(bin/saguin --version)"
+          if [[ "$got" != "saguin $TAG" ]]; then
+            echo "::error::bin/saguin --version says \"$got\", not \"saguin $TAG\""
+            exit 1
+          fi
+          echo "bin/saguin: $machine, static, $got"
+
+      # The archive holds one directory, saguin-<version>-linux-<arch>, with
+      # the binary, the licence, the README, the changelog and the licence
+      # texts of the code the binary carries. Owners, order and times are
+      # fixed (the commit's time), so the same binary gives the same archive.
+      - name: archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          name="saguin-$VERSION-linux-$ARCH"
+          dist="$RUNNER_TEMP/dist"
+          install -d -m 0755 "$dist/$name"
+          install -m 0755 bin/saguin "$dist/$name/saguin"
+          install -m 0644 LICENSE README.md CHANGELOG.md cmd/saguin/THIRD-PARTY-NOTICES.md "$dist/$name/"
+          tar --sort=name --owner=0 --group=0 --numeric-owner \
+            --mtime="@$(git log -1 --format=%ct)" \
+            -C "$dist" -cf - "$name" | gzip -9n > "$dist/$name.tar.gz"
+          tar -tvzf "$dist/$name.tar.gz"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: saguin-linux-${{ matrix.arch }}
+          path: ${{ runner.temp }}/dist/saguin-${{ needs.guard.outputs.version }}-linux-${{ matrix.arch }}.tar.gz
+          if-no-files-found: error
+
+  image:
+    needs: [guard, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/ifnesi/saguin
+      TAG: ${{ needs.guard.outputs.tag }}
+      VERSION: ${{ needs.guard.outputs.version }}
+      PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+      # The image's platforms, the same two the build job's matrix names.
+      ARCHS: amd64 arm64
+    steps:
+      # Only the Dockerfile is used from the checkout.
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: saguin-linux-*
+          path: ${{ runner.temp }}/dist
+          merge-multiple: true
+
+      # The build context holds each binary under its platform, taken from
+      # the release archive, so the image and the archive hold the same bytes.
+      - name: the build context, one binary per platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          for arch in $ARCHS; do
+            name="saguin-$VERSION-linux-$arch"
+            install -d "$RUNNER_TEMP/image/linux/$arch"
+            tar -xzOf "$RUNNER_TEMP/dist/$name.tar.gz" "$name/saguin" > "$RUNNER_TEMP/image/linux/$arch/saguin"
+            chmod 0755 "$RUNNER_TEMP/image/linux/$arch/saguin"
+          done
+          find "$RUNNER_TEMP/image" -type f -exec ls -l {} +
+
+      # QEMU runs the arm64 image on this amd64 runner for its test; the
+      # build itself runs no arm64 code.
       - uses: docker/setup-qemu-action@v4
+        with:
+          platforms: arm64
       - uses: docker/setup-buildx-action@v4
+
+      # One build per platform, loaded into this runner rather than pushed,
+      # because a loaded image holds one platform: a single multi-platform
+      # build could only go to the registry untested.
+      - name: build the amd64 image into this runner
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ runner.temp }}/image
+          file: ${{ github.workspace }}/Dockerfile
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: saguin:under-test-amd64
+          labels: |
+            org.opencontainers.image.source=https://github.com/ifnesi/saguin
+            org.opencontainers.image.version=${{ needs.guard.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: build the arm64 image into this runner
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ runner.temp }}/image
+          file: ${{ github.workspace }}/Dockerfile
+          platforms: linux/arm64
+          load: true
+          push: false
+          tags: saguin:under-test-arm64
+          labels: |
+            org.opencontainers.image.source=https://github.com/ifnesi/saguin
+            org.opencontainers.image.version=${{ needs.guard.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=Apache-2.0
+
+      # Each image is the platform it says it is and reports the tag. Then it
+      # starts the broker with a minimal configuration, its database in the
+      # image's data directory, answers an MQTT 3.1.1 CONNECT with a CONNACK
+      # that accepts it, and exits 0 when stopped. arm64 runs under QEMU, so
+      # the wait for the CONNACK is long.
+      - name: run each image
+        shell: bash
+        run: |
+          set -euo pipefail
+          cfg="$RUNNER_TEMP/image-test/saguin.yaml"
+          mkdir -p "$(dirname "$cfg")"
+          printf '%s\n' \
+            'broker:' \
+            '  id: release-test' \
+            '  storage:' \
+            '    file_path: /var/lib/saguin/saguin.db' \
+            '    default_retention_period: none' \
+            '    default_retention_bytes: none' > "$cfg"
+          chmod 0644 "$cfg"
+
+          # CONNECT: MQTT 3.1.1, clean session, keep alive 60 s, client id
+          # "t". A broker that accepts it answers 20 02 00 00. It runs in a
+          # subshell, so the connection closes when it returns.
+          connack() (
+            exec 3<> /dev/tcp/127.0.0.1/18830 2> /dev/null || exit 1
+            printf '\020\015\000\004MQTT\004\002\000\074\000\001t' >&3
+            got="$(timeout 5 head -c 4 <&3 | od -An -tx1 | tr -d ' \n')" || true
+            [[ "$got" == "20020000" ]]
+          )
+
+          for arch in $ARCHS; do
+            image="saguin:under-test-$arch"
+            platform="$(docker image inspect -f '{{.Os}}/{{.Architecture}}' "$image")"
+            if [[ "$platform" != "linux/$arch" ]]; then
+              echo "::error::the $arch image is $platform"
+              exit 1
+            fi
+            got="$(docker run --rm --platform "linux/$arch" "$image" --version)"
+            if [[ "$got" != "saguin $TAG" ]]; then
+              echo "::error::the $arch image says \"$got\", not \"saguin $TAG\""
+              exit 1
+            fi
+            echo "the $arch image says $got"
+
+            name="under-test-$arch"
+            docker run -d --platform "linux/$arch" --name "$name" \
+              -p 127.0.0.1:18830:1883 \
+              -v "$cfg:/etc/saguin/saguin.yaml:ro" "$image"
+            ok=false
+            for i in $(seq 1 120); do
+              if connack; then ok=true; break; fi
+              if [[ "$(docker inspect -f '{{.State.Running}}' "$name")" != true ]]; then
+                break
+              fi
+              sleep 1
+            done
+            if [[ "$ok" != true ]]; then
+              echo "::error::the $arch image did not accept an MQTT connection"
+              docker logs "$name"
+              exit 1
+            fi
+            echo "the $arch image accepts an MQTT connection"
+            docker stop -t 60 "$name" > /dev/null
+            code="$(docker inspect -f '{{.State.ExitCode}}' "$name")"
+            docker logs "$name"
+            docker rm -v "$name" > /dev/null
+            if [[ "$code" != 0 ]]; then
+              echo "::error::the $arch image exited $code when stopped"
+              exit 1
+            fi
+            echo "the $arch image stops with exit status 0"
+          done
 
       - uses: docker/login-action@v4
         with:
@@ -55,10 +368,75 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: goreleaser/goreleaser-action@v7
+      # The images that were tested are the ones pushed: they are tagged
+      # from this runner, not built again. Each goes up as <version>-<arch>;
+      # <version>, and `latest` for a release that is not a pre-release, are
+      # then one index naming those two, which `imagetools create` makes by
+      # reference without building anything. The index carries the same
+      # source, version and licence as the images.
+      - name: push the images that were tested
+        shell: bash
+        run: |
+          set -euo pipefail
+          refs=()
+          for arch in $ARCHS; do
+            docker tag "saguin:under-test-$arch" "$IMAGE:$VERSION-$arch"
+            docker push "$IMAGE:$VERSION-$arch"
+            refs+=("$IMAGE:$VERSION-$arch")
+          done
+          tags=(-t "$IMAGE:$VERSION")
+          [[ "$PRERELEASE" == true ]] || tags+=(-t "$IMAGE:latest")
+          docker buildx imagetools create "${tags[@]}" \
+            --annotation "index:org.opencontainers.image.source=https://github.com/ifnesi/saguin" \
+            --annotation "index:org.opencontainers.image.version=$VERSION" \
+            --annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
+            "${refs[@]}"
+
+      # The index names exactly the two platforms.
+      - name: the pushed index names linux/amd64 and linux/arm64
+        shell: bash
+        run: |
+          set -euo pipefail
+          got="$(docker buildx imagetools inspect --raw "$IMAGE:$VERSION" | python3 -c '
+          import json, sys
+          index = json.load(sys.stdin)
+          print(" ".join(sorted(m["platform"]["os"] + "/" + m["platform"]["architecture"]
+                                for m in index["manifests"] if m["platform"]["os"] != "unknown")))')"
+          if [[ "$got" != "linux/amd64 linux/arm64" ]]; then
+            echo "::error::$IMAGE:$VERSION names $got, not linux/amd64 linux/arm64"
+            exit 1
+          fi
+          docker buildx imagetools inspect "$IMAGE:$VERSION"
+
+  release:
+    needs: [guard, image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ needs.guard.outputs.tag }}
+      VERSION: ${{ needs.guard.outputs.version }}
+      PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+    steps:
+      - uses: actions/download-artifact@v8
         with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: release --clean --release-notes=${{ runner.temp }}/notes.md
+          path: ${{ runner.temp }}/release
+          merge-multiple: true
+
+      # SHA256SUMS lists both archives in the format `sha256sum -c` reads.
+      # The release is made for the tag already pushed (--verify-tag), never
+      # a new one, with the CHANGELOG.md section as its notes.
+      - name: create the GitHub release
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/release"
+          sha256sum saguin-*.tar.gz > SHA256SUMS
+          cat SHA256SUMS
+          flags=()
+          [[ "$PRERELEASE" == true ]] && flags+=(--prerelease)
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "Sagüin $VERSION" --notes-file notes.md "${flags[@]}" \
+            saguin-*.tar.gz SHA256SUMS

@@ -15,10 +15,9 @@ want. Make one when you want something else.
 
 Then open <http://localhost:5005>.
 
-The first run indexes the documentation: the corpus, cut into a few hundred
-chunks and embedded on the machine, no network. **It takes a few minutes** -
-around eleven on a 2014 four-core desktop, less on anything modern - and the
-progress bar says which stage it is on and how far through, because a first
+The first run indexes the documentation: the corpus, cut into about seven
+hundred chunks and embedded on the machine, no network. **It takes a few
+minutes**, and the progress bar says which stage it is on and how far through, because a first
 run that only shows a percentage looks exactly like a hang.
 
 ## What it is
@@ -29,17 +28,20 @@ and then answers. Nothing is fine-tuned and nothing is memorised - the model
 sees the same excerpts you can open yourself, which is why every answer ends
 with what it read.
 
-The corpus is `README.md`, `docs/invariants.md`, every RFC, the annotated
-`examples/saguin.yaml`, `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md` and
-`LICENSE`, read from the checkout this runs in. **Every answer states the commit** those documents came from, and
-the navbar states it too - Sagüin gained authentication, TLS and mutual TLS
-in a single day, so an index a month old answers this month's questions with
-last month's documents, fluently and wrongly.
+The corpus is `README.md`, the design (`docs/design.md`, with
+`docs/config.md`, `docs/metrics.md` and `docs/storage.md`),
+`examples/README.md`, the annotated `examples/saguin.yaml`, the MQTT
+standards in `docs/mqtt/`, `CONTRIBUTING.md`, `CHANGELOG.md` and `LICENSE`,
+read from the checkout this runs in. The design's rules R1 to R9 are one
+chunk each, so a reference reads `docs/design.md › Sagüin design › Rules ›
+R4`. **Every answer states the commit** those documents came from, and the
+navbar states it too, because an index a month old answers this month's
+questions with last month's documents, fluently and wrongly.
 
 ## What it refuses to do
 
 Ask any language model an MQTT question and it will answer - from other
-brokers, from the specification. Almost all of that is *nearly* right for
+brokers, from memory of the specification. Almost all of that is *nearly* right for
 Sagüin, which is worse than wrong: somebody writes another broker's
 `max_queued_messages` into a configuration and the broker refuses to start,
 or believes a queue behaves like a shared subscription, which fails
@@ -83,13 +85,11 @@ rather than spinning: *"ollama is running but does not have qwen2.5:3b. Run
 
 `questions.yaml` holds questions with known answers, including the ones that
 trap a fluent model: how to disable bridge certificate verification (there
-is deliberately no way), whether a memory provider survives a power cut (it
-does not), what `allow_anonymous` defaults to (it follows the password
-file). A question the documents genuinely do not answer expects the
-refusal itself.
+is no way), whether memory mode survives a power cut (it does not), what
+`allow_anonymous` defaults to (it follows the password file).
 
 ```sh
-docker compose exec agent python -m app.questions
+docker compose exec ai python -m app.questions
 ```
 
 It exists because chunking, the embedding model, the prompt and the
@@ -99,12 +99,13 @@ better and answers worse is otherwise indistinguishable from an improvement.
 ## What it is made of
 
 `BAAI/bge-small-en-v1.5` for the embeddings (ONNX, no PyTorch, no GPU), held
-in memory and searched with a numpy dot product - the corpus is a few hundred
-chunks, three orders of magnitude below the scale a vector database is for, so
+in memory and searched with a numpy dot product - the corpus is several
+hundred chunks, three orders of magnitude below the scale a vector database is for, so
 there is no database to run. Alongside it, exact-term search over the files
-themselves: the documents' vocabulary is precise, and a rule about "one
-consumer per record" is the answer to "can two workers get the same job" that
-an embedding trained on prose does not reward. Flask for the backend, React
+themselves: the documents' vocabulary is precise, and a rule that "each
+worker receives one job at a time per queue" is the answer to "can two
+workers get the same job" that an embedding trained on prose does not
+reward. Flask for the backend, React
 from vendored UMD files for the interface - no npm, no build step, no CDN at
 runtime. The embedding model and the JavaScript are both downloaded when the
 image is built, so this works on a machine with no route to the internet,

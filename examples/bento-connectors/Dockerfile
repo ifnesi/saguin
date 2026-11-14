@@ -8,24 +8,12 @@
 # pipelines.
 #
 # One more image comes out of this file - the traffic generator - and its
-# stage is at the bottom. saguin is not built here: docker-compose.yml runs
-# its published image, ghcr.io/ifnesi/saguin, so the broker, the pipelines
-# and a load share one network and the stack is `docker compose up` and
-# nothing else.
+# stage is at the bottom. The broker and the viewer are not built here: they
+# are pulled as their published images, and docker-compose.yml names them.
 #
-# The alternative for saguin was leaving it on the host and reaching it
-# through host.docker.internal. That was tried and abandoned, and it is worth
-# recording why: it works on macOS and Windows and fails on Linux the moment
-# a firewall is enabled, where container-to-host packets are dropped rather
-# than refused - a scrape that times out with nothing in any log to say a
-# firewall did it. Fixing that means telling the reader to open a port to a
-# subnet Docker assigned, which is a different instruction on ufw, firewalld
-# and nftables and no instruction at all on the other two operating systems.
-# On the compose network there is no host, no gateway and no firewall.
-#
-# **Every stage builds from the repository root**, so docker-compose.yml
-# names one context for both. The Bento stage needs nothing from it and
-# fetches its own source; the traffic generator is copied out of the checkout.
+# **Every stage builds from this directory**, so docker-compose.yml names one
+# context for both. The Bento stage needs nothing from it and fetches its own
+# source; the traffic stage copies traffic.py out of it.
 
 # The toolchain Bento's own go.mod asks for. A newer one would work; naming
 # the exact version means the build does not start depending on whatever
@@ -109,30 +97,8 @@ FROM docker.io/library/python:3.13-alpine AS traffic
 # on a library upgrade teaches somebody the broker is broken.
 RUN pip install --no-cache-dir --root-user-action=ignore "paho-mqtt==2.1.0"
 
-COPY examples/bento-connectors/traffic.py /traffic.py
+COPY traffic.py /traffic.py
 
 USER nobody
 ENTRYPOINT ["python3", "-u", "/traffic.py"]
 
-
-# --------------------------------------------------------------------------
-# **The viewer is not built here, and no longer in this repository either.** It
-# is `ifnesi/saguin-viewer`, and docker-compose.yml runs its published image,
-# ghcr.io/ifnesi/saguin-viewer.
-#
-# It exists because MQTT Explorer is no window onto this stack: that image
-# builds its connection with MQTT.js and never sets protocolVersion, so it
-# asks for MQTT 3.1.1. saguin refused that outright when this stack was
-# built and admits it today, which changes nothing here - a 3.1.1 client is
-# handed no user properties, so the offsets, the broker timestamps and the
-# `schema` pointer are all invisible to it. Control Center is a step
-# downstream - it shows what reached Kafka, not what the devices sent.
-#
-# What that costs here, said rather than discovered: **this stack's payloads
-# are protobuf, and the viewer shows them as hex rather than as decoded
-# readings.** Not because it knows no schemas - it reads them out of saguin's
-# registry, which is what makes it a viewer for any deployment rather than
-# for this one - but because the protobuf toolchain has no musl wheels and
-# would add ten minutes to a build on Alpine, so its image leaves it out.
-# Topics, message properties, offsets and the channel each record landed in
-# are all there, and Control Center shows the decoded form on the Kafka side.

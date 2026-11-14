@@ -130,9 +130,9 @@ def forever(name, fn, every):
 def durable_consumer():
     """A second consumer with a session, on a channel Bento already fills.
 
-    **This is the strand saguin_channel_consumer_position_min depends on**,
-    and that metric is half of the one alert RFC 0005 says the whole
-    catalogue exists for: a channel's floor passing a consumer's position is
+    **This is the strand saguin_channel_position_min depends on**,
+    and that metric is half of the one alert the metrics catalogue exists
+    for: a channel's floor passing a consumer's position is
     data deleted before anybody read it. With no durable consumer the metric
     has no series at all and the panel is empty rather than healthy.
 
@@ -151,18 +151,12 @@ def durable_consumer():
 def queue_worker():
     """A worker that mostly succeeds, sometimes fails, and sometimes dies.
 
-    All three on purpose. Acknowledging moves saguin_queue_acknowledged_total;
-    returning moves _returned_total and puts the job back at once; going
-    silent lets the visibility timeout take it back, which is
-    _redelivered_total - and a job unlucky enough to be dropped three times
-    reaches max_attempts and lands in the dead-letter channel.
-
-    **That is not the only way _dead_lettered_total moves, and saying so was
-    wrong.** A job nobody ever took expires after `job_expires_after` and
-    dead-letters with `saguin-dlq-reason=expired` and `attempts=0` - which is
-    what every record in this stack's dead-letter channel was, for as long as
-    this worker's subscription was silently dropped. The two reasons are told
-    apart by that property, and the viewer shows it.
+    Acknowledging moves saguin_queue_acknowledged_total. Returning a job
+    or letting its visibility hold expire increments
+    saguin_queue_attempts_failed_total with cause return or timeout, and the
+    job is offered again after its retry delay. Exhausting three attempts
+    moves it to the dead-letter channel; retention can also move unfinished
+    work there, with saguin-dlq-reason saying why.
     """
     def on_message(client, _userdata, msg):
         props = msg.properties
@@ -257,7 +251,7 @@ def mistakes():
     c = connect("traffic-mistakes")
 
     def tick():
-        c.publish("iot/tasks/settle/invented/__dlq", "not allowed", qos=1)
+        c.publish("__dlq/iot/tasks/settle/invented", "not allowed", qos=1)
         c.publish("iot/nowhere/typo/nobody", "nobody is listening", qos=1)
         greedy = connect("traffic-greedy", session_expiry=365 * 24 * 3600)
         time.sleep(1)

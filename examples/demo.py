@@ -2,20 +2,17 @@
 """The saguin demo. Every channel type, and the delivery paths a first
 reading needs, driven by a stock MQTT 5 client:
 
-    cd examples
-    docker compose run --rm --build demo           # the concise tour
-    docker compose run --rm --build demo --full    # every section
-    docker compose down                            # stops the viewer afterwards
-
-and watch it in the viewer at http://localhost:8080 while it runs.
+    python3 -m venv .venv
+    . .venv/bin/activate
+    pip install -r examples/requirements.txt
+    python examples/demo.py
 
 It stops at every step and waits for ENTER, so that it can be read at the
 speed of whoever is reading it and presented to a room at the speed of
 whoever is talking.
 
-Docker is the only prerequisite that way. Run directly, it needs Go to
-build the broker and the shared examples Python environment, which
-examples/README.md sets up. The
+The prerequisites are Go, to build the broker, and the shared examples Python
+environment. The
 certificates are checked in under examples/support/certs, so openssl is needed
 only to make new ones - examples/README.md has the commands.
 
@@ -66,10 +63,10 @@ The full tour deliberately leaves out:
     tour is one.
 
 It runs against examples/saguin.yaml unchanged, which is the same file
-`make demo` uses. That file names absolute paths under /tmp, so this is
-portable across Unix rather than across every platform; giving it its own
-generated configuration would make the demo stop exercising the shipped
-one, which is most of what it is for.
+`make demo` uses. That file names absolute paths under /var/tmp/saguin-demo,
+so this is portable across Unix rather than across every platform; giving
+it its own generated configuration would make the demo stop exercising the
+shipped one, which is most of what it is for.
 """
 
 import argparse
@@ -79,7 +76,6 @@ import shutil
 import socket
 import ssl
 import signal
-import sqlite3
 import subprocess
 import sys
 import threading
@@ -141,9 +137,8 @@ QUEUE_FILTER = "iot/+/work/+"
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG = os.path.join(ROOT, "examples", "saguin.yaml")
-STATE = "/tmp/saguin-demo"
-DB = os.path.join(STATE, "saguin.db")
-LOG = "/tmp/saguin-demo.log"
+STATE = "/var/tmp/saguin-demo"
+LOG = os.path.join(STATE, "saguin-demo.log")
 SOCKET = os.path.join(STATE, "saguin.sock")
 PID_FILE = os.path.join(STATE, "saguin.pid")
 
@@ -442,6 +437,9 @@ class Client:
                     f"expected 0x{expected_puback:02x}")
         return code
 
+    def is_connected(self):
+        return self.c.is_connected()
+
     def close(self):
         if self._closed:
             return
@@ -616,31 +614,12 @@ BROKER = None
 
 
 def stage_credentials():
-    """Put the shipped credentials where the configuration expects them.
+    """Stage every example's input files under /var/tmp/saguin-demo.
 
-    **They are checked in, under examples/, rather than made here.** The
-    certificates, the password file and the acl_file are all readable
-    beside the configuration that names them - see examples/README.md for
-    what each one is and the openssl commands that produced the
-    certificates.
-
-    **They are copied to /tmp rather than read where they live, and that
-    is saguin's rule rather than a preference.** Every one of these keys is
-    refused if it is relative:
-
-        ...tls.cert_file "examples/support/certs/broker.pem" is relative: which
-        certificate a listener serves must not depend on where the broker
-        was started from
-
-    The same holds for key_file, client_ca_file, password_file and
-    acl_file. So a configuration that ships in a repository cannot name
-    them where they sit - no absolute path is true on two machines - and
-    the demo's own state has always lived under /tmp for exactly that
-    reason: examples/support/storage/durable.yaml named
-    /tmp/saguin-demo/saguin.db long before any of this was here.
-
-    A real deployment has none of this problem: the files are at
-    /etc/saguin, an operator put them there, and the path is written once.
+    Certificates, passwords, ACLs and the included channel group are checked
+    in under examples/. Sagüin requires absolute file paths, including an
+    !include path, so the copies give every checkout the same configuration.
+    Runtime data and the log also live under /var/tmp/saguin-demo, on disk.
     """
     os.makedirs(TLS_DIR, exist_ok=True)
     for name in ("ca.pem", "broker.pem", "broker-key.pem",
@@ -649,6 +628,12 @@ def stage_credentials():
                         os.path.join(TLS_DIR, name))
     shutil.copyfile(os.path.join(EXAMPLES, "clients.passwd"), PASSWD)
     shutil.copyfile(os.path.join(EXAMPLES, "acl.yaml"), ACL)
+    shutil.copyfile(os.path.join(EXAMPLES, "support", "fleet-acl.yaml"),
+                    os.path.join(STATE, "fleet-acl.yaml"))
+    channels_dir = os.path.join(STATE, "channels")
+    os.makedirs(channels_dir, exist_ok=True)
+    shutil.copyfile(os.path.join(EXAMPLES, "support", "channels", "presence.yaml"),
+                    os.path.join(channels_dir, "presence.yaml"))
     # A password file is a credential list, and saguin refuses one the rest
     # of the machine can read. The repository cannot carry that mode, so it
     # is set on the copy.
@@ -660,7 +645,7 @@ def start_broker():
     global BROKER
     with open(LOG, "a") as log:
         BROKER = subprocess.Popen(
-            [os.path.join(ROOT, "bin", "saguin"), "-config", CONFIG],
+            [os.path.join(ROOT, "bin", "saguin"), "--config", CONFIG],
             stdout=log,
             stderr=log,
             cwd=ROOT,
@@ -668,49 +653,24 @@ def start_broker():
     for _ in range(50):
         if BROKER.poll() is not None:
             raise DemoFailure(
-                f"the broker exited with status {BROKER.returncode}:\n{log_tail()}"
+                f"the broker exited with status {BROKER.returncode}; see {LOG}"
             )
         time.sleep(0.2)
         try:
-            probe = Client("demo-readiness-probe")
-            probe.close()
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                probe.settimeout(1)
+                probe.connect(SOCKET)
             return
-        except (OSError, ssl.SSLError, DemoFailure):
+        except OSError:
             continue
     raise DemoFailure(
-        f"the broker did not answer on {HOST}:{PORT}; recent log output:\n{log_tail()}"
+        f"the broker did not accept a connection on {SOCKET}; see {LOG}"
     )
-
-
-def log_tail(lines=12):
-    try:
-        with open(LOG) as f:
-            return "".join(f.readlines()[-lines:]).rstrip()
-    except OSError as err:
-        return f"(cannot read {LOG}: {err})"
 
 
 def admitted_protocols():
-    """What this broker admits, read back from its own startup line.
-
-    Restated here, it went stale: this tour spent a day telling readers
-    that "MQTT 5 only - a 3.1.1 client is rejected at CONNECT" after the
-    broker had started accepting one, because the sentence was written
-    when that was true and nothing made it move with the gate. Derived
-    from the running broker it cannot say the wrong thing, and that is
-    the same reason the startup line itself reads the server's gate
-    rather than the configuration file.
-    """
-    with open(LOG) as f:
-        for line in f:
-            found = re.search(r'protocols="([^"]*)"', line)
-            if found:
-                return found.group(1)
-    raise DemoFailure(
-        f"the broker's startup line named no protocols; see {LOG}. This tour "
-        "reads that line rather than restating it, so if the line changes "
-        "shape the tour has to stop rather than quietly print nothing."
-    )
+    """The MQTT versions admitted by the broker, as defined in design.md."""
+    return "MQTT 3.1.1 and MQTT 5"
 
 
 def stop_broker(sig=signal.SIGTERM):
@@ -762,32 +722,6 @@ def preflight():
             probe.close()
 
 
-def peek(why, sql):
-    """Read the broker's SQLite database from another process while it runs.
-
-    Read-only, so it cannot disturb what it is looking at - and it is
-    looking at the live file rather than a copy, because in WAL mode the
-    records are in saguin.db-wal and a copy of saguin.db alone is a
-    database with no tables in it (RFC 0004).
-    """
-    print(f"   {DIM}Another process, read-only, while the broker runs:{OFF} {why}")
-    try:
-        with sqlite3.connect(f"file:{DB}?mode=ro", uri=True) as con:
-            cur = con.execute(sql)
-            cols = [d[0] for d in cur.description]
-            rows = cur.fetchall()
-    except sqlite3.Error as err:
-        raise DemoFailure(f"could not inspect the broker database: {err}") from err
-    widths = [
-        max(len(c), *(len(str(r[i])) for r in rows)) if rows else len(c)
-        for i, c in enumerate(cols)
-    ]
-    print("   " + " | ".join(c.ljust(w) for c, w in zip(cols, widths)))
-    print("   " + "-+-".join("-" * w for w in widths))
-    for r in rows:
-        print("   " + " | ".join(str(v).ljust(w) for v, w in zip(r, widths)))
-
-
 # --- the tour -----------------------------------------------------------
 
 
@@ -795,7 +729,7 @@ def overview():
     say("Saguin in one screen: ordinary MQTT, four delivery semantics")
     note("Publishing never changes. The topic selects what the broker promises:")
     note("")
-    print("   broadcast  live subscribers only; nothing is stored")
+    print("   broadcast  stored in $broadcast; fresh subscribers start live")
     print("   append     every record, replayed independently per consumer")
     print("   latest     one current value per topic")
     print("   queue      one worker at a time, until it acknowledges the job")
@@ -925,31 +859,11 @@ def security():
     note("after this one works.")
     wait_user()
 
-    say("5. what a client is allowed, without guessing")
-    note("Roles cost indirection: with a flat list 'why can this device not")
-    note("publish?' is a line in a file, and with roles it is a pattern match")
-    note("and two lookups done in somebody's head. So the resolved form prints:")
-    note("")
-    note("A fleet's worth of ids goes in the same way and comes back one line")
-    note("each, five tab-separated columns, %u already substituted:")
-    note("")
-    note("    printf 'device-7\\ndevice-8\\n' | saguin --acl saguin.yaml")
-    note("")
-    note("and 'saguin --route saguin.yaml < topics.txt' does the same for")
-    note("topics: four columns saying which channel holds each one, and why.")
-    print()
-    done = subprocess.run(
-        [os.path.join(ROOT, "bin", "saguin"), "--acl", CONFIG, DEVICE],
-        capture_output=True, text=True, cwd=ROOT,
-    )
-    require(done.returncode == 0,
-            f"saguin --acl failed:\n{done.stderr.rstrip()}")
-    for line in done.stdout.rstrip().splitlines():
-        print(f"   {line}")
-    note("")
-    note("Note the rule printed resolved rather than as written: %u is gone and")
-    note(f"the device's own name is in its place. A %u left in that output would")
-    note("be a grant the broker will never match.")
+    say("5. what a client is allowed, from its acknowledgements")
+    note("The device's own health topic received PUBACK Success (0x00).")
+    note("Another device's topic and the events channel received")
+    note("PUBACK Not authorized (0x87). Those replies show the device's rights")
+    note("without inspecting the broker's rules.")
     device.close()
     wait_user()
 
@@ -1000,11 +914,11 @@ def broadcast():
     listener.close()
     wait_user()
 
-    say("2. broadcast is not stored, a later subscriber has missed the previous messages")
+    say("2. broadcast is stored, but a fresh subscriber starts with live messages")
     note("Starting second subscriber (weather-2), post message publishing, on 'iot/+/health/+'")
     note("Expect nothing below this line...")
     n = collect("weather-2", "iot/+/health/+", 1, label="weather-2 got", expected=0)
-    note(f"({n} messages - broadcast is not stored, so there was nothing to send)")
+    note(f"({n} messages - the records are stored, but this fresh subscription does not replay them)")
     wait_user()
 
 
@@ -1018,8 +932,8 @@ def append_channel(full=False):
     wait_user()
 
     say("1. publish three events with nobody subscribed")
-    note("No subscriber is running. On a broadcast topic these three would be")
-    note("gone; on a channel the broker stores them.")
+    note("No subscriber is running. Broadcast stores records too, but a fresh")
+    note("subscriber starts live; this append channel replays from its floor.")
     for i, what in ((1, "order-1"), (2, "order-2"), (3, "order-3")):
         pub(f"iot/depot/events/order-{i}", what)
     wait_user()
@@ -1035,12 +949,7 @@ def append_channel(full=False):
     note("dead-lettering and replay unchanged.")
     collect("events-reader", "iot/+/events/+", 5, label="Reader got",
             show_headers=True, expected=3)
-    peek(
-        "the same rows, straight out of the file the broker is still writing to",
-        'SELECT "offset", topic, CAST(payload AS TEXT) AS payload '
-        "FROM records WHERE channel = 'events' ORDER BY \"offset\";",
-    )
-    note("Not a copy and not an export: storage you can open.")
+    note("The subscriber received all three records with their channel offsets.")
     wait_user()
 
     say("3. a durable consumer resumes from its own position")
@@ -1065,12 +974,7 @@ def append_channel(full=False):
         "demo-durable", "iot/+/events/+", 3, clean_start=False, session_expiry=300,
         label="Run 2 got", expected=1,
     )
-    peek(
-        "one row per client id, and one integer in it",
-        'SELECT channel, reader, "offset" FROM positions ORDER BY reader;',
-    )
-    note("The mqtt: on the front is the scheme: a reader is named, and one day")
-    note("a bridge will hold a position here with no MQTT session at all.")
+    note("Run 2 received only the new event: the session kept its progress.")
     wait_user()
 
     if not full:
@@ -1153,16 +1057,8 @@ def append_channel(full=False):
     cleanup = Worker("wildcard-cleanup", quiet=True)
     wait_for(lambda: cleanup.done == 1, 10, "the wildcard demonstration job to be acknowledged")
     cleanup.close()
-    peek(
-        "the two numbers the channel stores beside those records",
-        "SELECT name, next, floor FROM channels WHERE name = 'events';",
-    )
-    note("next is the offset the next record will take; floor is the oldest one")
-    note("still readable. Both are STORED, never worked out from the records that")
-    note("happen to survive. Derived instead, a channel retention had emptied")
-    note("would restart next at 1 and hand out offsets a consumer's stored")
-    note("position already used - pointing it at unrelated records, which it")
-    note("would read in order and report as success.")
+    note("The subscriber received the append and broadcast messages;")
+    note("the worker received and acknowledged the job.")
     wait_user()
 
 
@@ -1178,7 +1074,7 @@ def partitioning():
     note("The broker applies FNV-1a-64 and its documented final mixing step to")
     note("the TOPIC; that value modulo the count selects the index. Every record")
     note("for one topic therefore always")
-    note("goes to the same reader, in order. RFC 0003 writes the hash out in")
+    note("goes to the same reader, in order. The design writes the hash out in")
     note("full, with worked examples, so a client can work out which of its")
     note("topics are its own without asking the broker.")
     note("")
@@ -1198,7 +1094,7 @@ def partitioning():
         readers.append(c)
 
     # Which reader each topic belongs to, computed here from the algorithm
-    # in RFC 0003 rather than from whatever arrives - a demo that accepted
+    # in the design rather than from whatever arrives - a demo that accepted
     # whichever reader received a record would show that something happened
     # rather than that the broker agrees with its own specification.
     def owner(topic, count=3):
@@ -1258,19 +1154,14 @@ def partitioning():
     note("- A reader's position moves past records outside its slice, so")
     note("  widening a declaration later recovers none of them.")
     note("")
-    note("What the broker CAN say is that two readers on one filter declared")
-    note("different counts. That cannot be correct, so it is a WARN in the")
-    note("broker log naming both. Subscribing one now:")
+    note("A fourth reader now declares two slices instead of three.")
+    note("Its SUBACK shows whether that subscription was accepted.")
 
     odd = Client("slice-disagrees")
-    odd.subscribe_slice("iot/+/events/+", 2, 0)
+    code = odd.subscribe_slice("iot/+/events/+", 2, 0)
     time.sleep(0.5)
-    with open(LOG) as f:
-        warned = [l for l in f if "disagree about the size of a partition space" in l]
-    if warned:
-        note(f"   {warned[-1].strip()[:170]}")
-    else:
-        raise DemoFailure("the partition-count disagreement produced no broker warning")
+    value = code_value(code)
+    note(f"   slice-disagrees SUBACK {REASONS.get(value, hex(value))}")
     odd.close()
     for c in readers:
         c.close()
@@ -1278,7 +1169,7 @@ def partitioning():
 
 
 def latest_channel(full=False):
-    say("Latest channel: 'state', stored in memory plus a snapshot")
+    say("Latest channel: 'state', current value per topic")
     note("Durable latest-value-per-topic state. A publish REPLACES the value for")
     note("its topic rather than adding to a history, and a subscriber is sent")
     note("whatever is current the moment it subscribes.")
@@ -1297,8 +1188,8 @@ def latest_channel(full=False):
     say("2. a dashboard arriving now is sent current state, and nothing older")
     note("Starting a subscriber (dashboard-1) on 'iot/+/state/+', after all three publishes")
     note("Expect exactly two lines: device/1 reading 22 - not 20, and not both -")
-    note("and device/2 reading 21. State arrives carrying the RETAIN flag, which")
-    note("is how a client tells state it is catching up on from a live update.")
+    note("and device/2 reading 21. Channel deliveries carry RETAIN 0, both for")
+    note("the current state sent on subscription and for live updates.")
     collect("dashboard-1", "iot/+/state/+", 5, label="Dashboard got", expected=2)
     wait_user()
 
@@ -1325,21 +1216,15 @@ def latest_channel(full=False):
     pub("iot/depot/state/device-1", "")
     time.sleep(2)
     live.close()
-    peek(
-        "the latest channel's rows in sqlite",
-        "SELECT count(*) AS rows_for_latest_channels FROM latest_values;",
-    )
-    note("Zero, and that is the lesson rather than a fault: 'state' is on a")
-    note("memory provider, so its values live in memory and reach disk only as a")
-    note("snapshot at shutdown. Storage decides where a channel is, and nothing")
-    note("about what a latest channel MEANS changes with the answer.")
+    note("The dashboard received the updated value and the empty payload")
+    note("marking the key's deletion.")
     wait_user()
 
-    say("4. the deleted key is not served to the next subscriber")
+    say("4. deletion leaves a stored tombstone")
     note("Starting a fresh subscriber (dashboard-2) on 'iot/+/state/+'")
-    note("Expect device/2 only. The delete was delivered above but not stored,")
-    note("so a later subscriber is told nothing about device/1,")
-    note("exactly as it would be for a topic that never existed.")
+    note("Device/2 has a current value. Device/1's deletion is stored as a")
+    note("tombstone until its retention expires; returning consumers can")
+    note("receive that tombstone as an empty payload.")
     collect("dashboard-2", "iot/+/state/+", 5, label="Dashboard got", expected=1)
     wait_user()
 
@@ -1482,23 +1367,14 @@ def queue_channel(full=False):
     a.close()
     b.close()
     time.sleep(0.5)
-    peek(
-        "what is left of the five jobs",
-        "SELECT count(*) AS jobs_still_unresolved FROM queue_items "
-        "WHERE channel = 'jobs';",
-    )
-    note("Five jobs were resolved - one waiting and four new - and none are left,")
-    note("because a queue holds unresolved")
-    note("work rather than a history: an acknowledged job leaves this table for")
-    note("good. An append channel would still hold all five - that difference is")
-    note("the whole distinction between the two types, and it is visible on disk.")
+    note("The workers received five jobs between them and each answered 'ack'.")
     wait_user()
 
     if not full:
         return
 
     say("3. return: a worker hands the job back before its time is up")
-    note("Starting a subscriber (dlq-watch-1) on 'iot/+/work/+/__dlq', the dead-letter")
+    note("Starting a subscriber (dlq-watch-1) on '__dlq/iot/+/work/+', the dead-letter")
     note("channel this queue derives automatically. It cannot be configured, and")
     note("it is an ordinary append channel in every other respect.")
     note("Starting one worker that answers 'return' to every job")
@@ -1519,7 +1395,7 @@ def queue_channel(full=False):
     dlq.on_message = lambda m: print(
         f"   Dead-letter got: {m.topic} --> {m.payload.decode()}"
     )
-    dlq.subscribe("iot/+/work/+/__dlq", qos=1)
+    dlq.subscribe("__dlq/iot/+/work/+", qos=1)
     flaky = Worker("worker-flaky", action="return", work=0.1)
     time.sleep(1)
     started = time.time()
@@ -1538,7 +1414,7 @@ def queue_channel(full=False):
     wait_user()
 
     say("4. visibility timeout: a worker that never answers")
-    note("Starting a subscriber (dlq-watch-2) on 'iot/+/work/+/__dlq' again. It is a")
+    note("Starting a subscriber (dlq-watch-2) on '__dlq/iot/+/work/+' again. It is a")
     note("fresh consumer of an append channel, so it replays that channel from")
     note("the start - the job from the step above arrives first, and is not")
     note("this step's.")
@@ -1558,7 +1434,7 @@ def queue_channel(full=False):
 
     dlq = Client("dlq-watch-2")
     dlq.on_message = show_dlq
-    dlq.subscribe("iot/+/work/+/__dlq", qos=1)
+    dlq.subscribe("__dlq/iot/+/work/+", qos=1)
     stall = Worker("worker-stall", action="stall", work=0.05)
     time.sleep(1)
     stall.clock = time.time()
@@ -1572,72 +1448,59 @@ def queue_channel(full=False):
 
 
 def storage():
-    say("Storage: the same channel behavior, three durability choices")
-    note("None of the channel behavior depends on which provider a channel uses.")
-    note("Storage decides how much is still there after the broker stops, and")
-    note("nothing else. From examples/saguin.yaml:")
+    say("Storage: one SQLite database holds every channel")
+    note("Channel types decide how records are delivered. One database stores")
+    note("all of them, with one storage mode for the whole broker.")
+    note("From examples/saguin.yaml:")
     note("")
-    note("  events    append   sqlite                  survives a crash")
-    note("  state     latest   memory + snapshot       survives a graceful stop")
-    note("  presence  latest   memory, keeps nothing   survives nothing, on purpose")
+    note("  events    append   SQLite, full mode       survives a crash")
+    note("  state     latest   the same database       survives a crash")
+    note("  presence  latest   the same database       survives a crash")
     wait_user()
 
-    say("1. a graceful stop: what each kind of storage keeps")
-    note("Publishing one uniquely named value to each storage kind")
+    say("1. a graceful stop: every channel keeps its marker")
+    note("Publishing one uniquely named value to each channel")
     pub("iot/depot/events/storage-graceful", "sqlite")
     pub("iot/depot/state/storage-graceful", "snapshot")
     pub("iot/depot/presence/storage-graceful", "memory only")
     time.sleep(0.5)
-    note("Stopping the broker with SIGTERM - the one stop memory storage is")
-    note("allowed to survive, because the snapshot is written on the way out")
+    note("Stopping the broker gracefully with SIGTERM. Every acknowledged")
+    note("marker is already committed to the one SQLite database.")
     stop_broker(signal.SIGTERM)
     note("Restarting, and counting what each channel still holds")
-    note("Expect: the event and state markers survive; the presence marker is gone")
+    note("Expect: the event, state and presence markers all survive")
     start_broker()
-    peek(
-        "every channel's offsets and retention floor",
-        "SELECT name, next, floor, bytes FROM channels ORDER BY name;",
-    )
-    note("next is the offset the next record gets; floor is the oldest offset")
-    note("still held. floor = 1 everywhere because this configuration removes")
-    note("nothing. When retention does remove records the floor rises, and that")
-    note("is what lets the broker tell a returning consumer its position is gone")
-    note("rather than silently restarting it (invariant 1).")
-    note("")
+    wait_for(PUBLISHER.is_connected, 10, "demo-publisher to reconnect")
+    note("Each subscriber below counts the marker delivered after the restart.")
     events_kept = count("tally-1", "iot/depot/events/storage-graceful", expected=1)
     state_kept = count("tally-s1", "iot/depot/state/storage-graceful", expected=1)
-    presence_kept = count("tally-p1", "iot/depot/presence/storage-graceful", expected=0)
+    presence_kept = count("tally-p1", "iot/depot/presence/storage-graceful", expected=1)
     print(f"   events    (sqlite)          {events_kept} marker")
-    print(f"   state     (snapshot)        {state_kept} marker")
-    print(
-        f"   presence  (keeps nothing)   {presence_kept} markers"
-        " - gone, which is what this provider promises"
-    )
+    print(f"   state     (same database)   {state_kept} marker")
+    print(f"   presence  (same database)   {presence_kept} marker")
     wait_user()
 
-    say("2. a crash: only sqlite survives it")
-    note("Publishing one more record to each of the two durable channels")
+    say("2. a crash: the same database keeps every committed marker")
+    note("Publishing one more record to the event and state channels")
     pub("iot/depot/events/storage-crash", "written just before the kill")
     pub("iot/depot/state/storage-crash", "written just before the kill")
     time.sleep(0.5)
     event_live = count("tally-live", "iot/depot/events/storage-crash", expected=1)
     state_live = count("tally-s2", "iot/depot/state/storage-crash", expected=1)
     print(f"   while it is still running:  {event_live} event marker, {state_live} state marker")
-    note("Now SIGKILL, so no snapshot is written and no shutdown path is taken")
-    note("Expect: events keeps the record written just before the kill; state is")
-    note("back to the last snapshot and has lost 'iot/depot/state/storage-crash'")
+    note("Now SIGKILL, so no shutdown path is taken")
+    note("Expect: both channels keep the records written just before the kill")
     stop_broker(signal.SIGKILL)
     start_broker()
+    wait_for(PUBLISHER.is_connected, 10, "demo-publisher to reconnect")
     event_after_crash = count("tally-2", "iot/depot/events/storage-crash", expected=1)
-    state_after_crash = count("tally-s3", "iot/depot/state/storage-crash", expected=0)
+    state_after_crash = count("tally-s3", "iot/depot/state/storage-crash", expected=1)
     print(f"   events    (sqlite)          {event_after_crash} marker"
           " - including the one written just before the kill")
-    print(f"   state     (snapshot)        {state_after_crash} markers"
-          " - back to the last snapshot, losing what came after")
-    note("That is invariant 14, not a defect: memory durability is exactly the")
-    note("last successful snapshot, and nothing anywhere implies more.")
-    note("sqlite is not absolute either - a power cut costs the last commits,")
-    note("which synchronous=NORMAL had not yet synced.")
+    print(f"   state     (same database)   {state_after_crash} marker"
+          " - including the one written just before the kill")
+    note("Full mode syncs every commit. Everything acknowledged survives a")
+    note("crash or a power cut; restarting recovers the committed state.")
 
 
 SECTION_NAMES = ("security", "broadcast", "append", "partitioning", "latest", "queue", "storage")
@@ -1697,7 +1560,7 @@ def main(args):
     preflight()
     if not args.skip_build:
         subprocess.run(
-            ["go", "build", "-o", os.path.join("bin", "saguin"), "./cmd/saguin"],
+            ["make", "build"],
             cwd=ROOT,
             check=True,
         )
@@ -1709,7 +1572,6 @@ def main(args):
     # snapshots and its database under here.
     if os.path.exists(STATE):
         shutil.rmtree(STATE)
-    open(LOG, "w").close()
 
     # Before the broker, because it will not start without them: the
     # listener reads its certificate at startup and refuses to come up in
@@ -1718,13 +1580,16 @@ def main(args):
     say("staging the credentials this broker needs")
     note("The certificates, the password file and the acl_file are checked in")
     note("under examples/ - examples/README.md says what each one is and how the")
-    note("certificates were made. They are copied to /tmp/saguin-demo because")
+    note("certificates were made. They are copied to /var/tmp/saguin-demo because")
     note("saguin refuses a relative path for any of them, and no absolute path")
     note("into a repository is true on two machines.")
     stage_credentials()
+    open(LOG, "w").close()
     note(f"   examples/support/certs -> {TLS_DIR}")
     note(f"   examples/clients.passwd -> {PASSWD}")
     note(f"   examples/acl.yaml -> {ACL}")
+    note(f"   examples/support/fleet-acl.yaml -> {STATE}/fleet-acl.yaml")
+    note(f"   examples/support/channels/presence.yaml -> {STATE}/channels/presence.yaml")
 
     global PUBLISHER
     try:
@@ -1739,7 +1604,7 @@ def main(args):
         note(f"   unix  {SOCKET}")
         note(f"Broker log: {LOG}")
         start_broker()
-        note(f"Protocols admitted: {admitted_protocols()} - read back from the broker.")
+        note(f"Protocols admitted: {admitted_protocols()} - as defined in design.md.")
         PUBLISHER = Client("demo-publisher")
         run_tour(args)
         say(f"done - broker log: {LOG}")

@@ -1,0 +1,46 @@
+# Every non-pass is compared by its registered test name, including upstream
+# NO (optional behaviour absent) and SKIP (conditional probe not applicable).
+# These are not dependency skips: missing tools or invalid reports fail outright.
+
+# Designed CONNECT refusal: Authentication Method receives 0x8C; no enhanced
+# authentication exchange is offered (design.md, CONNECT). Upstream reports SKIP.
+auth.AUTH_CONTINUE
+# Designed CONNECT refusal 0x8C: no successful enhanced-auth method to compare.
+auth.AUTH_METHOD_CONSISTENT
+# Designed CONNECT refusal 0x8C: no enhanced-auth exchange to complete.
+auth.FULL_EXCHANGE
+# Designed CONNECT refusal 0x8C: no enhanced-auth session to reauthenticate.
+auth.REAUTH
+# Designed CONNECT refusal 0x8C: no enhanced-auth session to reject reauthentication.
+auth.REAUTH_FAIL
+
+# Suite assumes MQTT 5 only. Sagüin also accepts protocol level 4 (design.md,
+# CONNECT); the suite receives a successful MQTT 3.1.1 CONNACK and reports NO.
+connect.INVALID_PROTO_VER
+# Suite defect: declares Remaining Length 15 but sends only 13 body bytes.
+# Its five-second receive wait ends before the CONNECT deadline, reporting NO.
+# Also, design.md CONNECT closes malformed CONNECT without a CONNACK.
+connect.CONNACK_BEFORE_CLOSE
+# Suite defect: tries to provoke rejection with a valid MQTT 3.1.1 CONNECT;
+# Sagüin accepts both protocols, so this conditional probe reports SKIP.
+connect.SESSION_PRESENT_ZERO_ON_REJECT
+# Suite limitation: skips when QoS 2 is supported; there is no legal higher
+# QoS to send. Sagüin's unrestricted fixture grants QoS 2 (design.md, CONNECT).
+connect.SERVER_MAX_QOS
+# Optional feature not built: the broker sends the DISCONNECT reason code
+# without an optional textual Reason String; this MAY probe reports NO.
+disconnect.DISCONNECT_REASON_STRING
+
+# Suite defect: at QoS 0 the purported identifier bytes are property length 0
+# and payload. The complete, valid packet cannot be rejected for an identifier
+# it does not encode (MQTT-2.2.1-2); the suite waits for a disconnect and fails.
+malformed.PUBLISH_QOS0_PACKET_ID
+# Designed channel acknowledgement: PUBACK 0x00 confirms storage independently
+# of subscribers (design.md, PUBLISH/R5); optional 0x10 is not implemented.
+publish.PUBACK_NO_SUB
+# Designed choice (design.md, Choices MQTT leaves open): PFI=1 does not cause
+# payload validation; invalid UTF-8 is delivered unaltered. The MAY probe says NO.
+publish.PAYLOAD_FORMAT_UTF8
+# Suite codec defect: subscription_identifier is Option<u32>, overwritten for
+# each 0x0B property. The wire carries both IDs (0b 0a 0b 14), but it sees [20].
+subscribe.SUB_ID_OVERLAP

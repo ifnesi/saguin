@@ -1,20 +1,16 @@
 # A home Zigbee hub, with no Zigbee hardware.
 #
-#   viewer      http://localhost:4001   the topic tree, a live feed, a replay
-#                                       control, and saguin's own numbers
-#
 #   saguin      MQTT 5, authenticated             localhost:1883
 #               operations listener, /metrics     localhost:9091
+#   viewer      saguin-viewer, as viewer-hub      localhost:4001
 #   zigbee2mqtt the real thing, unmodified        talks to both below
 #   coordinator the emulated radio                zigbee2mqtt's serial port
 #
-# Nothing publishes to saguin but zigbee2mqtt. Device readings begin as ZCL
-# reports from the coordinator emulator, cross the radio socket, and
-# zigbee2mqtt decodes, names and publishes them.
+# The two gateways publish readings. Zigbee readings begin as ZCL reports
+# from the coordinator; RF readings begin as samples from the transmitter.
 #
-# Ports 1883 and 9091 rather than 9090, so this stack can run beside the
-# bento-connectors one without either wondering why the other's broker is
-# answering its tests.
+# MQTT uses 1883 and operations uses 9091. Run one example stack at a time:
+# both stacks publish MQTT on 1883.
 #
 # The `z` on each bind mount relabels the mounted file for SELinux. Needed on
 # Fedora, RHEL and their relatives, ignored everywhere else.
@@ -34,8 +30,7 @@ services:
   coordinator:
     <<: *logging
     build:
-      context: ../..
-      dockerfile: examples/home-automation/Dockerfile
+      context: .
       target: coordinator
     container_name: zb-coordinator
     command:
@@ -44,7 +39,7 @@ services:
       # Every request answered, not only the unanswered ones. This demo is
       # about a protocol nobody can see, so the log is half of what it shows.
       - "-verbose"
-      # These three must match zigbee2mqtt's `advanced:` block. On a mismatch
+      # These four must match zigbee2mqtt's `advanced:` block. On a mismatch
       # zigbee2mqtt decides the coordinator belongs to another network and
       # tries to commission a new one.
       - "-pan-id"
@@ -57,12 +52,12 @@ services:
       - "11"
     restart: unless-stopped
 
-  # The published image. It has no shell and no wget, so there is no health
-  # check inside it: the clients below start once it has started, and each
-  # reconnects until it answers.
   saguin:
     <<: *logging
-    image: ghcr.io/ifnesi/saguin:0.1.0-rc.1
+    # The published broker image: a scratch image running as uid 10001, with
+    # no shell. Its default command reads /etc/saguin/saguin.yaml, mounted
+    # below with the files it names; the database goes in /var/lib/saguin.
+    image: ghcr.io/ifnesi/saguin:0.2.0
     container_name: zb-saguin
     ports:
       - "1883:1883"
@@ -75,13 +70,32 @@ services:
       - saguin-data:/var/lib/saguin
     restart: unless-stopped
 
+  # The broker's health check. The broker image has no shell and no HTTP
+  # client to ask its own /health, so this container asks it over the compose
+  # network, and the services below wait for this one to be healthy.
+  saguin-health:
+    <<: *logging
+    image: docker.io/library/busybox:1.37.0
+    container_name: zb-saguin-health
+    depends_on:
+      - saguin
+    # tini as PID 1, so `docker compose stop` ends the sleep at once.
+    init: true
+    command: ["sleep", "2147483647"]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://saguin:9090/health"]
+      interval: 3s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
   zigbee2mqtt:
     <<: *logging
     image: koenkk/zigbee2mqtt:2.14.1
     container_name: zb-zigbee2mqtt
     depends_on:
-      saguin:
-        condition: service_started
+      saguin-health:
+        condition: service_healthy
       coordinator:
         condition: service_started
     volumes:
@@ -92,7 +106,7 @@ services:
       - ./zigbee2mqtt.yaml:/seed/configuration.yaml:ro,z
       # Three devices zigbee2mqtt already knows, so it does not interview them
       # at startup. That is the normal state of a hub that has been running -
-      # seed/README-seed.md says why, and what still comes over the radio.
+      # README.md explains the seed and what still comes over the radio.
       # JSON Lines, and named so: `.db` is in .gitignore because that rule is
       # about sqlite databases, and this is a checked-in fixture.
       - ./seed/devices.jsonl:/seed/devices.jsonl:ro,z
@@ -112,15 +126,14 @@ services:
   transmitter:
     <<: *logging
     build:
-      context: ../..
-      dockerfile: examples/home-automation/Dockerfile
+      context: .
       target: transmitter
     container_name: zb-transmitter
     command:
       - "-listen"
       - "0.0.0.0:1234"
-      # A round of all three every half minute. Slow enough to read in the
-      # viewer, often enough that the demo does something while watched.
+      # A round of all three every half minute, slow enough to read and
+      # frequent enough to observe while watching.
       - "-report"
       - "30s"
     restart: unless-stopped
@@ -138,8 +151,8 @@ services:
     image: hertzg/rtl_433:latest
     container_name: zb-rtl433
     depends_on:
-      saguin:
-        condition: service_started
+      saguin-health:
+        condition: service_healthy
       transmitter:
         condition: service_started
     command:
@@ -164,16 +177,13 @@ services:
       - "json"
     restart: unless-stopped
 
-  # ifnesi/saguin-viewer, pointed at this stack rather than a page written
-  # for it. The topic tree with the devices under it, a live feed as readings
-  # arrive, the replay control that demonstrates the append channel really
-  # does hand back what a listener missed, and a publish form for sending a
-  # command back to a device.
+  # MQTT tools on the compose network; only run when explicitly requested.
   viewer:
     <<: *logging
-    # The viewer's published image: it lives in `ifnesi/saguin-viewer`, and
-    # this stack is one deployment that points it at a broker.
-    image: ghcr.io/ifnesi/saguin-viewer:latest
+    # ifnesi/saguin-viewer's published image: the house as a topic tree, a
+    # live feed, a publish form for device commands, replay, the sessions
+    # with each user's access, and the broker's metrics.
+    image: ghcr.io/ifnesi/saguin-viewer:0.2.0
     container_name: zb-viewer
     ports:
       - "4001:8080"
@@ -181,9 +191,6 @@ services:
       SAGUIN_VIEWER_LISTEN: "0.0.0.0:8080"
       SAGUIN_MQTT_HOST: saguin
       SAGUIN_MQTT_PORT: "1883"
-      SAGUIN_MQTT_PROTOCOL: "5"
-      # The acl.yaml binds `viewer-*` to a client id equal to the user name,
-      # so these two must stay the same string.
       SAGUIN_MQTT_USER: viewer-hub
       SAGUIN_MQTT_PASSWORD: viewer-password-change-me
       SAGUIN_VIEWER_CLIENT_ID: viewer-hub
@@ -191,9 +198,16 @@ services:
       SAGUIN_OPS_USER: operator
       SAGUIN_OPS_PASSWORD: operator-password-change-me
     depends_on:
-      saguin:
-        condition: service_started
+      saguin-health:
+        condition: service_healthy
     restart: unless-stopped
+
+  mqtt-client:
+    <<: *logging
+    image: docker.io/library/eclipse-mosquitto:2
+    profiles: [tools]
+    entrypoint: []
+
 
 volumes:
   saguin-data:

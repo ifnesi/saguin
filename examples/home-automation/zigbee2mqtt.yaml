@@ -84,7 +84,6 @@ advanced:
   log_level: info
 
 # Off, so the demo is the MQTT side rather than zigbee2mqtt's own web page.
-# The saguin viewer is what this stack puts a browser on.
 frontend:
   enabled: false
 

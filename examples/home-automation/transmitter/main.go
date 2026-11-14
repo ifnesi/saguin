@@ -17,6 +17,7 @@ package main
 
 import (
 	"encoding/binary"
+	"errors"
 	"flag"
 	"io"
 	"log"
@@ -77,13 +78,7 @@ func (m *modulator) emit(d time.Duration, amp int) {
 }
 
 func clamp(v int) byte {
-	if v < 0 {
-		return 0
-	}
-	if v > 255 {
-		return 255
-	}
-	return byte(v)
+	return byte(min(255, max(0, v)))
 }
 
 func (m *modulator) take() []byte {
@@ -96,6 +91,9 @@ func main() {
 	addr := flag.String("listen", ":1234", "address to serve rtl_tcp on")
 	every := flag.Duration("report", 30*time.Second, "how often each device transmits")
 	flag.Parse()
+	if *every <= 0 {
+		log.Fatal("-report must be greater than zero")
+	}
 
 	ln, err := net.Listen("tcp", *addr)
 	if err != nil {
@@ -104,12 +102,24 @@ func main() {
 	log.Printf("rtl_tcp on %s, %d devices, one round every %s",
 		*addr, len(newDevices()), *every)
 
+	var backoff time.Duration
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			var temporary net.Error
+			if !errors.As(err, &temporary) || !temporary.Temporary() {
+				log.Fatalf("accept: %v", err)
+			}
+			if backoff == 0 {
+				backoff = 5 * time.Millisecond
+			} else {
+				backoff = min(2*backoff, time.Second)
+			}
 			log.Printf("accept: %v", err)
+			time.Sleep(backoff)
 			continue
 		}
+		backoff = 0
 		log.Printf("%s connected: a receiver has tuned in", conn.RemoteAddr())
 		serve(conn, *every)
 		conn.Close()
@@ -155,14 +165,17 @@ func serve(conn net.Conn, every time.Duration) {
 			}
 			log.Printf("transmitted %s: %.1fC %d%%", d.name, d.tempC, d.humidity)
 
-			// The quiet between devices, in tenths, so a receiver that
-			// disconnects is noticed within one of them.
-			for i := 0; i < int(gap/(100*time.Millisecond)); i++ {
-				if _, err := conn.Write(quiet); err != nil {
+			// Keep writes at most a tenth of a second apart, including the
+			// final partial interval so every report setting keeps its gap.
+			for left := gap; left > 0; {
+				pause := min(left, 100*time.Millisecond)
+				samples := int(pause*time.Duration(sampleRate)/time.Second) * 2
+				if _, err := conn.Write(quiet[:samples]); err != nil {
 					log.Printf("%s gone: %v", conn.RemoteAddr(), err)
 					return
 				}
-				time.Sleep(100 * time.Millisecond)
+				time.Sleep(pause)
+				left -= pause
 			}
 		}
 	}

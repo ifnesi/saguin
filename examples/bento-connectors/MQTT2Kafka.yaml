@@ -59,13 +59,11 @@ input:
       # `saguin-dlq-reason`, `saguin-dlq-attempts` and the offset it held in
       # the queue, which is what a redrive needs to put it back.
       #
-      # The channel is still called `jobs__dlq` - a name is what a snapshot
-      # file and a seek topic are built from - but the *topic* is the
-      # queue's own with a `__dlq` level appended, which is what puts a dead
-      # letter inside a filter a subscriber can write. The queue's filter is
-      # `iot/tasks/+/+`, so its dead letters are one level deeper and the
-      # routing below matches on the suffix.
-      - "iot/tasks/+/+/__dlq"
+      # The queue derives the append channel `jobs__dlq`. Each dead-letter
+      # topic is the job's topic prefixed with `__dlq/`, so a failed job on
+      # `iot/tasks/settle/1234` arrives on `__dlq/iot/tasks/settle/1234`.
+      # The mapping below routes that prefix to Kafka's `jobs-dlq` topic.
+      - "__dlq/iot/tasks/+/+"
 
       # **The schema registry, carried out beside the records it defines.**
       # It is the `schemas` channel: a `latest` channel holding the current
@@ -151,7 +149,7 @@ pipeline:
         # have a no-op case use a `noop` processor" - and it refuses it by
         # exiting, so the pipeline that carries every record to Kafka does
         # not start at all.
-        - check: 'metadata("mqtt_topic").has_suffix("/__dlq")'
+        - check: 'metadata("mqtt_topic").has_prefix("__dlq/")'
           processors:
             - noop: {}
 
@@ -185,7 +183,7 @@ pipeline:
         # legal too, but it reads as a typo, so this is the one row where the
         # two names deliberately differ - which is the reason the mapping is
         # written out rather than derived.
-        - check: 'metadata("mqtt_topic").has_suffix("/__dlq")'
+        - check: 'metadata("mqtt_topic").has_prefix("__dlq/")'
           processors:
             - mapping: 'meta route_kafka_topic = "jobs-dlq"'
 

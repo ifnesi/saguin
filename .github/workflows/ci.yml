@@ -1,0 +1,27 @@
+# GitHub runs `make check` on every push and pull request: the build,
+# formatting, the dependency list, go vet, golangci-lint and every unit test
+# under the race detector. Conformance, fuzz, soak, the end-to-end fuzzer and
+# the outside suites run locally, in `make ci` and `make interop`.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # make check runs golangci-lint; go install puts it in ~/go/bin,
+      # where the Makefile's GOLANGCI_LINT looks by default.
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+      - name: Check
+        run: make check

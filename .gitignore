@@ -1,60 +1,48 @@
-# Compiled binaries and packaging output
-/saguin
-/saguind
-/bin/
-/dist/
-*.test
-*.exe
+# Build output: `make build` writes the shipped binary here.
+bin/
 
-# Coverage and profile output
-coverage.out
-coverage.html
+# Temporary files: make's TMPDIR, the test folders and Go's build scratch.
+.tmp/
+
+# Local Python environment and bytecode for the examples.
+.venv/
+__pycache__/
+
+# Test binaries (`go test -c`), coverage and profiles.
+*.test
+*.out
+*.cover
 *.prof
 *.pprof
 
-# Vendored source
-vendor/
+# A local Go workspace, which the module's build must not depend on.
+go.work
+go.work.sum
 
-# Local runtime state. The SQLite database and the memory provider's
-# snapshot both contain message payloads in the clear.
+# A broker run by hand from the checkout: its database and SQLite's files
+# beside it.
 *.db
 *.db-wal
 *.db-shm
-*.sqlite
-*.sqlite-wal
-*.sqlite-shm
-*.snapshot
-*.sock
+*.db-journal
 
-# Secrets and logs
-.env
-.env.*
-*.log
-*.pid
-
-# Python virtual environment for examples/demo.py, which is created by
-# hand rather than by the demo: a script that installs packages is a
-# script somebody has to read before running, and the point of the demo
-# is that it can be run.
-.venv/
-*.pyc
-
-# Editor and OS noise
-.DS_Store
+# Editors and operating systems.
+.idea/
+.vscode/
 *.swp
-.vscode
-.audits
+*~
+.DS_Store
 
-__pycache__/
-
-# Assistant working files stay on the developer's machine. Only the
-# saguin-ask skill, which answers questions from these documents, ships.
-/CLAUDE.md
-/.claude/*
-!/.claude/skills/
-/.claude/skills/*
-!/.claude/skills/saguin-ask/
-/.agents/*
-!/.agents/skills/
-/.agents/skills/*
-!/.agents/skills/saguin-ask/
+# Development files kept out of the public repository.
+CLAUDE.md
+docs/Execution/
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/saguin-ask/
+!.claude/skills/saguin-config/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/saguin-ask/
+!.agents/skills/saguin-config/

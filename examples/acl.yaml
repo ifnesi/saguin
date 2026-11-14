@@ -22,13 +22,14 @@ roles:
     - channel: events
       allow: [write, read, seek]
     - channel: state
-      allow: [write, read, delete]
+      allow: [write, read]
     - channel: presence
-      allow: [write, read, delete]
+      allow: [write, read]
     - channel: jobs
       allow: [write, consume]
+    # Only the broker writes dead letters; readers may replay or seek them.
     - channel: jobs__dlq
-      allow: [write, read, seek]
+      allow: [read, seek]
     # A topic rule governs broadcast - the topics no channel claims.
     - topic: "#"
       allow: [write, read]
@@ -45,9 +46,8 @@ roles:
   # reconnection, and what the device may do when it comes back is whatever
   # these two files say then. Taking access away is: edit this file and the
   # password file, signal the broker with SIGUSR1 to re-read them, and then
-  # hang the client up so it connects again and is refused. RFC 0002,
-  # "Withdrawing a device's access", has the four steps and what each one
-  # alone leaves behind.
+  # hang the client up so it connects again and is refused. See design.md,
+  # Access and reload, for when each change takes effect.
   #
   # The other reason to reach for it has nothing to do with credentials: a
   # queue lease goes back when the connection ends, so hanging up a stuck
@@ -70,8 +70,8 @@ roles:
   # a broker without the feature would answer it: `qos2` is told Maximum
   # QoS 1 at connect, `share` is told Shared Subscription Available 0,
   # `persistent` gets a session that ends with the connection, and a Will or
-  # a retained broadcast value it may not have is refused. RFC 0002, "Taking
-  # a feature away", has the whole table.
+  # a retained value it may not have is refused. See design.md, CONNECT
+  # and Access and reload, for the refusal codes and reload rules.
   #
   # Nobody here carries it; give it to a fleet of constrained sensors.
   constrained:
@@ -117,17 +117,17 @@ users:
   # comes to, limits included.
   "device-*":
     roles: [device]
-    # Which devices may log in under this name. `%u` is the name itself, so
-    # this says "connect under the name on your certificate" - one line for
-    # a fleet of any size, and what makes the client id in a log line worth
-    # reading. Omit the key and any client id may use the credential.
+    # Which client ids may log in under this fleet pattern. A wildcard user
+    # entry with %u matches no client id, so use a literal pattern.
+    # An exact entry, like device-7 below, can bind the id to its identity.
+    # Omit the key and any client id may use the credential.
     #
     # It matters most when several devices SHARE a credential: five
     # passwords for a thousand sensors is a fair trade, and
     # `client_ids: "north-*"` then keeps the northern password from being
     # used by a southern device. Inside one credential it cannot help, and
     # nothing can - devices sharing a secret are one principal.
-    client_ids: "%u"
+    client_ids: "device-*"
     limits:
       # A sensor: a reading every few seconds, and small ones.
       publish_rate: 20
@@ -136,9 +136,9 @@ users:
   # And the exception, which is where the rule that settles them shows: both
   # patterns match `device-7`, and the one that spells the id out most
   # exactly supplies the WHOLE entry - its roles and its limits together.
-  # The same rule RFC 0002 uses to settle two channel filters claiming one
-  # topic. This one is looser than the fleet it sits in, which a bound that
-  # only tightened could not express.
+  # An exact user name beats every pattern. Among patterns, the one with
+  # most non-'*' characters wins. This entry has looser limits than the
+  # fleet it sits in, which a bound that only tightened could not express.
   #
   # **So this entry is the complete statement about device-7**, and `device`
   # is repeated here rather than inherited: the fleet entry above no longer

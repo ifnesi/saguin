@@ -1,0 +1,8 @@
+# Suite defect: rumqttc automatically acknowledges deliveries, but the test
+# demands distinct identifiers across all messages, even after acknowledgement.
+# Wire: PUBLISH id=1 msg0, client PUBACK 40 02 00 01, PUBLISH id=1 msg1.
+# Reusing the lowest free identifier is design.md, Delivery (MQTT-2.3.1-3).
+variableheader.MQTT-2.3.1-4
+# Same suite defect in this separate test: its seen_pkids set never removes
+# identifiers after rumqttc's automatic PUBACK. Wire confirms ACK before reuse.
+operational.MQTT-4.6.0-4

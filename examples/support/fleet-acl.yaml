@@ -1,0 +1,23 @@
+# The fleet starting point's channel names differ from the guided tour's.
+# One device identity may write/read only its own topics. %u is substituted
+# after authentication; the demo password user and certificate both work.
+roles:
+  device:
+    - channel: events
+      filter: fleet/%u/events/#
+      allow: [write, read, seek]
+    - channel: status
+      filter: fleet/%u/status
+      allow: [write, read]
+    - channel: jobs
+      filter: fleet/%u/work
+      allow: [write, read]
+  # Back-office services take the vans' jobs from the queue as its workers
+  # (MQTT 5, subscribed to $saguin/queue/jobs).
+  worker:
+    - channel: jobs
+      allow: [consume]
+users:
+  demo: [device]
+  "device-*": [device]
+  "worker-*": [worker]

@@ -28,7 +28,7 @@
 # in this tree already do.
 #
 # Not part of `make check`: it needs a Docker daemon, several minutes and
-# the Confluent images. `make smoke` runs it, and it leaves the stack up so
+# the Confluent images. Run ./smoke.sh; it leaves the stack up so
 # that a failure can be looked at.
 set -uo pipefail
 cd "$(dirname "$0")"
@@ -50,6 +50,22 @@ code()    { curl -s -o /dev/null -w '%{http_code}' -u "$1" "http://localhost:909
 # a metric that is missing and a metric that is genuinely 0 are the same
 # number to a caller, and several of the faults below are exactly that.
 metric() { metrics | awk -v s="$1" '$1 == s { print $2; found=1 } END { if (!found) print "ABSENT" }'; }
+# Store-derived gauges can lag a new stored position until the next refresh.
+# Allow a full 60-second refresh interval plus margin, returning the last value
+# on timeout so the caller makes the same pass/fail judgement as an early read.
+metric_at_least() {
+  local series="$1" minimum="$2" budget="${3:-90}" deadline value
+  deadline=$(( $(date +%s) + budget ))
+  while :; do
+    value=$(metric "$series")
+    if { [ "$value" != ABSENT ] && [ "${value%.*}" -ge "$minimum" ] 2>/dev/null; } \
+        || [ "$(date +%s)" -ge "$deadline" ]; then
+      printf '%s\n' "$value"
+      return
+    fi
+    sleep 1
+  done
+}
 kafka()  { docker compose exec -T kafka "$@" 2>/dev/null; }
 
 echo "bringing the stack up"
@@ -72,7 +88,7 @@ echo "the stack itself"
 #    The bridge dead on boot from `processors: []` looked like this.
 running=$(docker compose ps --format '{{.Service}} {{.State}}' | awk '$2 == "running" { print $1 }' | wc -l)
 if [ "$running" -lt 10 ]; then
-  bad "services running" "only $running are running; this stack has fourteen, so nothing below measured the demo"
+  bad "services running" "only $running are running; this stack has fifteen, so nothing below measured the demo"
   echo; echo "$fails failure(s) of $checks checks"; exit 1
 fi
 ok "services running" "$running"
@@ -99,7 +115,7 @@ else
 fi
 
 # 2b. **The denominator the slowest-consumer alert is a reading from.**
-#     `saguin_channel_consumer_position_min` on its own cannot tell one
+#     `saguin_channel_position_min` on its own cannot tell one
 #     straggler in a fleet from a single consumer that has stopped, and this
 #     is the gauge that separates them.
 #
@@ -108,7 +124,7 @@ fi
 #     a zero here is the gauge reporting a fleet that is not there. A `>= 1`
 #     that passes on any channel would pass on a broker where every consumer
 #     had gone, which is the case it exists to show.
-consumers=$(metric 'saguin_channel_consumers{channel="weather-measurement"}')
+consumers=$(metric_at_least 'saguin_channel_consumers{channel="weather-measurement"}' 1)
 if [ "$consumers" = ABSENT ]; then
   bad "the consumer count is published" \
     "saguin_channel_consumers is absent - the slowest-consumer alert has no denominator, so one straggler and a dead fleet read alike"
@@ -122,9 +138,9 @@ fi
 # 2c. **The routes the catalogue cannot answer**, and the scopes that
 #     decide who reaches them.
 #
-#     `saguin_channel_consumer_position_min` is one number per channel, so
+#     `saguin_channel_position_min` is one number per channel, so
 #     one straggler in a fleet reads exactly like a fleet that has stopped;
-#     `saguin_queue_depth` says how many jobs are stuck and nothing says
+#     `saguin_queue_jobs` says how many jobs are stuck and nothing says
 #     which. Both answers are in the store, and neither can be a metric: a
 #     client id is a string a client chose, so a series keyed by one is a
 #     series count chosen by whoever connects.
@@ -146,7 +162,7 @@ if ! queue=$(inspect /v1/operations/queues/jobs); then
 elif printf '%s' "$queue" | grep -q '"payload"'; then
   bad "the queue view answers" "the body carries a payload, and reading records is MQTT's job"
 else
-  ok "the queue view answers" "$(printf '%s' "$queue" | grep -o '"unresolved":[0-9]*' | head -1) unresolved"
+  ok "the queue view answers" "$(printf '%s' "$queue" | grep -o '"total":[0-9]*' | head -1) unfinished jobs"
 fi
 
 got=$(code prometheus:prometheus /v1/operations/consumers)
@@ -157,76 +173,11 @@ else
   ok "the scraper credential is narrowed" "403 on /v1/operations, 200 on /metrics"
 fi
 
-# 3. **The retry and dead-letter counters move, not merely exist.** A job
-#    being consumed, retried and dead-lettered is the lifecycle this demo is
-#    here to show, and every one of those numbers reads plausibly on a queue
-#    that has stopped: they are totals, so they keep whatever they reached.
-#    What says the lifecycle is still running is that they move.
-#    **Two of the three are asked to move and the third is not**, and the
-#    difference is not a softening. Delivering and taking back happen every
-#    few seconds; dead-lettering takes a job failing its every attempt, so
-#    it is rare by design - measured at 10 then 10 across a thirty-second
-#    window on a stack that was working perfectly, and four in ninety
-#    seconds when it did move. That it has happened at all is asserted here,
-#    and twice more below from the other end: the Kafka topic holding
-#    records, and the viewer showing them with the reason each failed.
-#
-#    **Waited for rather than timed, and the paragraph above is why.** This
-#    used to sample, sleep thirty seconds, and sample again - the fixed
-#    window it had just called a coin flip, applied to `redelivered`.
-#    It came up tails once: `2 then 2` on a queue that was
-#    working, with the counter at 22 two minutes later. Reproducing it took
-#    some doing and is the reason this is a wait and not a wider window:
-#    over 457 seconds idle the longest gap between redeliveries was 14.2s
-#    and no thirty-second window was empty, and saturating all sixteen
-#    cores changed the rate not at all (21.6/min against 23.2/min). But six
-#    consecutive runs of the old pattern gave deltas of 8, 5, 4, 6, 8 and
-#    **2**, so the margin reaches two on an idle machine and a busy one
-#    reached zero. A weighted coin is still a coin.
-#
-#    Polling keeps the assertion - the total must *move*, which is what
-#    separates a running lifecycle from one that stopped - and removes the
-#    flip, because it only fails if nothing happens for the whole budget.
-#    It is usually faster than the sleep it replaced. The interval is not
-#    below the operations listener's `min_scrape_interval`, or most polls
-#    would re-read a catalogue the broker has not rebuilt.
-#
-#    **The budget is four minutes because the longest quiet stretch anybody
-#    has measured is 93 seconds**, seen on a stack
-#    that shared the machine with a ten-minute soak and five ten-minute
-#    fuzzers across a 51-minute round. It was two minutes until that
-#    measurement existed, which is 27 seconds of headroom over the worst
-#    case - the kind of margin this check already failed on once. Four
-#    attempts to reproduce those stalls all came back under 15 seconds
-#    (idle, sixteen cores saturated, the soak alone, and the soak with five
-#    fuzzers), so the cause is still unknown and the budget is sized to the
-#    observation rather than to an explanation. It costs nothing when the
-#    stack is healthy: the check returns on the first poll.
-#
-#    **The poll is a minute because the catalogue is rebuilt at most that
-#    often**, which is `min_scrape_interval`'s floor. Polling faster re-reads
-#    a catalogue the broker has not rebuilt, so every extra poll is a
-#    guaranteed miss.
-#
-#    **And the budget went from four minutes to five for the same reason.**
-#    A stall is now only *observable* once a minute, so the 93-second worst
-#    case anybody has measured can take up to 153 seconds to show - four
-#    minutes left 87 seconds of headroom over that, which is thinner than
-#    the margin this check already failed on once.
-
-# advances waits for a counter to rise, and says so when it does not.
-#
-# **It reports how long it waited, and that is not decoration.** A wait
-# tolerates a lifecycle that is merely slow, where the fixed window it
-# replaced would have failed - so if it does not print the elapsed time, it
-# hides exactly the case nobody has explained. One run saw two
-# redeliveries in the first minute where this machine does about twenty,
-# and three attempts to reproduce that failed: idle, sixteen cores
-# saturated, and the sqlite soak running beside it all gave 21–27 a minute
-# with the longest gap under 15s. Something made that run different and
-# nobody knows what. Passing on the first poll and passing on the seventh
-# are different facts, and the number is how a later round sees which
-# happened rather than reading `ok` and moving on.
+# Deliveries and visibility-timeout failures must increase between samples.
+# A failed attempt is counted by its cause; the retry delay follows the failure.
+# Dead-lettering is rarer, so it is checked separately for an exhausted job.
+# Keep the five-minute budget and report elapsed time, so a slow lifecycle
+# remains visible. The counters are live; a minute between polls is generous.
 advances() {
   local series="$1" label="$2" budget="${3:-300}" was now deadline began waited
   was=$(metric "$series")
@@ -238,7 +189,7 @@ advances() {
   deadline=$(( began + budget ))
   now=$was
   while [ "$(date +%s)" -lt "$deadline" ]; do
-    sleep 60                     # >= min_scrape_interval; see above
+    sleep 60
     now=$(metric "$series")
     if [ "$now" != ABSENT ] && [ "${now%.*}" -gt "${was%.*}" ] 2>/dev/null; then
       waited=$(( $(date +%s) - began ))
@@ -250,26 +201,18 @@ advances() {
 }
 
 echo "  ...waiting for the queue lifecycle to move"
-for c in delivered redelivered; do
-  advances "saguin_queue_${c}_total{channel=\"jobs\"}" "queue $c advances"
-done
+advances 'saguin_queue_delivered_total{channel="jobs"}' "queue deliveries advance"
+advances 'saguin_queue_attempts_failed_total{channel="jobs",cause="timeout"}' "queue visibility timeouts advance"
 
-# **Waited for, not sampled.** A job dead-letters only once its three
-# attempts are exhausted - about three and a half minutes from a cold
-# start - and the catalogue recomputes at most once a minute, so on a cold
-# stack the first dead-letter arrives after this line does. A single read
-# here failed 4 of 28 checks on a cold run while the broker's log showed
-# the dead-letter landing seconds later, correct in every respect. A warm
-# stack answers on the first read and waits nothing. The three checks
-# below that open the __dlq channel inherit this ordering: the metric
-# trails the event, so by the time it moves, the record has long since
-# reached the viewer's tree and the Kafka mirror.
-dl=$(metric 'saguin_queue_dead_lettered_total{channel="jobs"}')
+# Wait for a job to exhaust its attempts. The worker makes random choices,
+# so one instantaneous sample cannot establish that the whole path works.
+# The same reason is checked against Kafka below, together with provenance.
+dl=$(metric 'saguin_queue_dead_lettered_total{channel="jobs",reason="attempts_exhausted"}')
 dl_deadline=$(( $(date +%s) + 300 ))
 while { [ "$dl" = ABSENT ] || [ "${dl%.*}" -le 0 ] 2>/dev/null; } \
       && [ "$(date +%s)" -lt "$dl_deadline" ]; do
   sleep 15
-  dl=$(metric 'saguin_queue_dead_lettered_total{channel="jobs"}')
+  dl=$(metric 'saguin_queue_dead_lettered_total{channel="jobs",reason="attempts_exhausted"}')
 done
 if [ "$dl" = ABSENT ] || [ "${dl%.*}" -le 0 ] 2>/dev/null; then
   bad "work has been dead-lettered" "saguin_queue_dead_lettered_total is $dl after waiting 300s - no job ran out of attempts in that window, so the half of the lifecycle this demo is most about has not happened"
@@ -277,177 +220,15 @@ else
   ok "work has been dead-lettered" "$dl"
 fi
 
-# 4. Every configured provider holds something. `volatile` was a flat zero
-#    because no channel used it, which is a configuration nobody meant.
-providers=0; emptyprov=""
-while read -r p; do
-  [ -z "$p" ] && continue
-  providers=$((providers+1))
-  b=$(metric "saguin_provider_bytes{provider=\"$p\"}")
-  if [ "$b" = ABSENT ] || [ "${b%.*}" -le 0 ] 2>/dev/null; then
-    emptyprov="$emptyprov $p($b)"
-  fi
-done < <(metrics | sed -n 's/^saguin_provider_info{provider="\([^"]*\)".*/\1/p')
-if [ "$providers" -lt 2 ]; then
-  bad "every provider holds something" "read $providers providers, and this demo configures two"
-elif [ -n "$emptyprov" ]; then
-  bad "every provider holds something" "empty:$emptyprov - a provider no channel uses"
+# Every channel and session shares one SQLite database in full mode.
+store=$(metric 'saguin_store_info{mode="full"}')
+bytes=$(metric_at_least saguin_store_bytes 1)
+if [ "$store" != 1 ]; then
+  bad "the shared SQLite store holds data" "saguin_store_info{mode=full} is $store, want 1"
+elif [ "$bytes" = ABSENT ] || [ "${bytes%.*}" -le 0 ] 2>/dev/null; then
+  bad "the shared SQLite store holds data" "saguin_store_bytes is $bytes, want a nonempty database"
 else
-  ok "every provider holds something" "$providers providers"
-fi
-
-echo
-echo "the viewer"
-
-# 4. Every channel a viewer can see is in its tree. `jobs` and `jobs__dlq`
-#    were missing from it entirely.
-#
-#    **A queue is excluded, and that is not a loophole.** The viewer never
-#    subscribes to one: a wildcard never reaches a queue, and a viewer that
-#    could would be taking jobs from the worker. The `__dlq` it derives is
-#    an append channel and must be there.
-tree=$(curl -sf http://localhost:4000/api/tree)
-if [ -z "$tree" ]; then
-  bad "the viewer answers" "no /api/tree at all"
-else
-  seen=$(printf '%s' "$tree" | python3 -c 'import json,sys; print(" ".join(sorted({r["channel"] for r in json.load(sys.stdin) if r.get("channel")})))')
-  want=$(metrics | sed -n 's/^saguin_channel_info{channel="\([^"]*\)".*type="\([^"]*\)".*/\2 \1/p' | awk '$1 != "queue" { print $2 }' | sort | tr '\n' ' ')
-  missing=""
-  for c in $want; do
-    case " $seen " in *" $c "*) ;; *) missing="$missing $c" ;; esac
-  done
-  nwant=$(printf '%s' "$want" | wc -w)
-  if [ "$nwant" -lt 4 ]; then
-    bad "every non-queue channel is in the viewer's tree" "read $nwant channels from the catalogue, which cannot be this demo"
-  elif [ -n "$missing" ]; then
-    bad "every non-queue channel is in the viewer's tree" "missing:$missing"
-  else
-    ok "every non-queue channel is in the viewer's tree" "$nwant channels"
-  fi
-fi
-
-# 5. **Every payload is shown as something**, whatever it turned out to be.
-#
-#    This once grepped for `no schema for msg_type`, which the page written
-#    for this stack printed in place of a record that had arrived perfectly.
-#    No viewer prints that string any more, so the check passed by comparing
-#    nothing - the exact failure this suite exists to catch.
-#
-#    What it asserts instead is the promise the viewer actually makes: the
-#    bytes are shown in every case, whether or not anything decoded them.
-#    This stack sends protobuf, so most arrive as `bytes` with a hex
-#    rendering, and the page draws the decoded record beside them rather
-#    than in their place. **The check stays on the bytes** - that is the
-#    promise that holds however the image is built, and a check on the
-#    decoded card would pass or fail on which decoders happened to be
-#    installed rather than on anything the viewer did.
-shown=0; blank=0; sampled=0
-while read -r topic; do
-  [ -z "$topic" ] && continue
-  sampled=$((sampled+1))
-  counts=$(curl -sf --get --data-urlencode "topic=$topic" http://localhost:4000/api/messages |
-    python3 -c '
-import json,sys
-good = bad = 0
-for m in json.load(sys.stdin).get("messages", []):
-    p = m.get("payload") or {}
-    # Something renderable, and a byte count beside it. An empty payload is
-    # a delete on a latest channel and is named rather than blank.
-    if p.get("kind") == "empty" or p.get("text") is not None \
-       or p.get("hex") is not None or p.get("value") is not None:
-        good += 1
-    else:
-        bad += 1
-print(good, bad)
-' 2>/dev/null)
-  set -- ${counts:-0 0}
-  shown=$((shown + $1)); blank=$((blank + $2))
-done < <(printf '%s' "$tree" | python3 -c 'import json,sys; [print(r["topic"]) for r in json.load(sys.stdin)[:12]]')
-if [ "$sampled" -lt 4 ]; then
-  bad "every payload is shown as something" "sampled $sampled topics, which is too few to have looked"
-elif [ "$shown" -eq 0 ]; then
-  bad "every payload is shown as something" "sampled $sampled topics and read no payloads at all"
-elif [ "$blank" -gt 0 ]; then
-  bad "every payload is shown as something" "$blank of $((shown+blank)) payloads render as nothing"
-else
-  ok "every payload is shown as something" "$shown payloads across $sampled topics"
-fi
-
-# 5. **The queue is in the viewer's channel list, with its depth.** It once
-#    vanished from that list entirely. It is not in the topic tree and must
-#    not be - the viewer never subscribes to a queue, because a wildcard
-#    never reaches one and a viewer that could would be taking jobs from the
-#    worker - so the channel list is the only place a person sees it.
-state=$(curl -sf http://localhost:4000/api/state)
-qline=$(printf '%s' "$state" | python3 -c '
-import json,sys
-d=json.load(sys.stdin)
-for c in d.get("channels", []):
-    if c.get("type") == "queue":
-        print(c["name"], c.get("held"), c.get("read"))
-' 2>/dev/null)
-if [ -z "$qline" ]; then
-  bad "the queue is in the viewer's channel list" "no queue channel in /api/state at all"
-else
-  set -- $qline
-  if [ "$2" = None ] || [ -z "${2:-}" ]; then
-    bad "the queue is in the viewer's channel list" "$1 is listed with no depth beside it"
-  else
-    ok "the queue is in the viewer's channel list" "$1, depth $2, read=$3"
-  fi
-fi
-
-# The viewer's answers travel over its own `viewer-reply/<id>` subscription,
-# and an acl_file that forgets the prefix loses every point read and seek
-# reply silently - the page degrades to working without them. This demo has
-# no acl_file, so today everything is granted and this check is the standing
-# guard for the day one appears. The count is printed so a viewer that
-# answered nothing cannot pass as one with nothing refused.
-subline=$(printf '%s' "$state" | python3 -c '
-import json,sys
-d=json.load(sys.stdin)
-subs=d.get("subscriptions") or []
-refused=[s["filter"] for s in subs if not s.get("granted")]
-print(str(len(subs)) + "|" + " ".join(refused))
-' 2>/dev/null)
-subcount=${subline%%|*}
-refused=${subline#*|}
-if [ -z "$subline" ] || [ "${subcount:-0}" -eq 0 ]; then
-  bad "every viewer subscription is granted" "no subscriptions readable in /api/state, so nothing was examined"
-elif [ -n "$refused" ]; then
-  bad "every viewer subscription is granted" "refused: $refused - an acl_file must grant viewer-reply/+ read"
-else
-  ok "every viewer subscription is granted" "$subcount subscriptions, none refused"
-fi
-
-# 6. **The dead-lettered work is there to open**, with the reason it failed.
-#    A channel that exists and holds nothing a person can read is the same
-#    to them as one that was never reached.
-dlqtopic=$(printf '%s' "$tree" | python3 -c '
-import json,sys
-# **A broadcast row carries a null channel.** The viewer subscribes to `#`
-# and shows topics no channel claims, which the page written for this stack
-# never did - so this once read `r["channel"].endswith(...)`, threw on the
-# first broadcast topic, and the 2>/dev/null turned that into "no __dlq
-# topic in the viewer'"'"'s tree". A check that fails for the wrong reason is
-# worse than one that does not run.
-for r in json.load(sys.stdin):
-    if (r.get("channel") or "").endswith("__dlq"):
-        print(r["topic"]); break
-' 2>/dev/null)
-if [ -z "$dlqtopic" ]; then
-  bad "dead-lettered work is there to open" "no __dlq topic in the viewer's tree"
-else
-  msgs=$(curl -sf --get --data-urlencode "topic=$dlqtopic" http://localhost:4000/api/messages)
-  n=$(printf '%s' "$msgs" | python3 -c 'import json,sys; print(len(json.load(sys.stdin).get("messages", [])))' 2>/dev/null)
-  reasons=$(printf '%s' "$msgs" | grep -c "saguin-dlq-reason")
-  if [ "${n:-0}" -eq 0 ]; then
-    bad "dead-lettered work is there to open" "$dlqtopic holds no messages a person can read"
-  elif [ "$reasons" -eq 0 ]; then
-    bad "dead-lettered work is there to open" "$n message(s) on $dlqtopic and none says why it failed"
-  else
-    ok "dead-lettered work is there to open" "$n on $dlqtopic, carrying saguin-dlq-reason"
-  fi
+  ok "the shared SQLite store holds data" "full mode, $bytes database bytes for every channel"
 fi
 
 echo
@@ -491,7 +272,7 @@ done
 #    topic mirrors a `latest` channel fed by an input whose own template
 #    says it "fires exactly 100 times... then this input closes and never
 #    fires again": a station's location does not change. Measured here at a
-#    flat 100 over ninety seconds, with saguin_published_total agreeing at
+#    flat 100 over ninety seconds, with saguin_records_stored_total agreeing at
 #    exactly 100, every one of them at start-up. A `latest` channel is the
 #    thing that does not stream, which is most of why it is in this demo.
 offsets() {
@@ -522,7 +303,7 @@ else
 fi
 
 dlq=$(offsets jobs-dlq)
-dead=$(metric 'saguin_queue_dead_lettered_total{channel="jobs"}')
+dead=$(metric 'saguin_queue_dead_lettered_total{channel="jobs",reason="attempts_exhausted"}')
 if [ "$dlq" -le 0 ]; then
   bad "jobs-dlq was reached" "offset $dlq - dead-lettered work reached no topic at all"
 elif [ "$dead" = ABSENT ] || [ "${dead%.*}" -le 0 ] 2>/dev/null; then

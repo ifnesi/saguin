@@ -1,0 +1,6 @@
+# Designed admission rule (design.md, CONNECT): empty Client ID with Clean
+# Start 0 receives CONNACK 0x85. Paho requires acceptance and returns False.
+test_zero_length_clientid
+# Suite defect: insists a refused MQTT 5 SUBSCRIBE returns 0x80; Sagüin
+# returns the more specific 0x87 for the forbidden $SYS/interop filter.
+test_subscribe_failure

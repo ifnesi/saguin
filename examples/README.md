@@ -1,37 +1,12 @@
 # The examples
 
-Everything here runs. `examples/saguin.yaml` is a working configuration
-that names every key Sagüin accepts, and `examples/demo.py` is a guided
-tour that starts a broker against it and walks every channel type in
-order. The tour runs in Docker, or directly with Go and Python.
+`examples/saguin.yaml` is a working configuration naming every accepted key,
+with defaults and comments explaining the settings. `examples/demo.py` is a
+Python guided tour using Eclipse Paho's MQTT 5 client. Run commands from the
+repository root. Building the broker needs Go and the C toolchain used by
+`make build`.
 
-`bento-connectors/` and `home-automation/` are stacks rather than scripts:
-one `docker compose up` each, and a README of their own.
-
-## The guided tour
-
-With nothing installed but Docker, from the repository root:
-
-```sh
-cd examples
-docker compose run --rm --build demo           # the concise tour
-docker compose run --rm --build demo --full    # every section
-docker compose down                            # stops the viewer afterwards
-```
-
-Watch it in [Sagüin viewer](https://github.com/ifnesi/saguin-viewer) at
-<http://localhost:8080> while it runs: the topics, a live feed and replay.
-The tour runs against Sagüin's published image.
-
-It stops at every step and waits for ENTER, so it can be read at the speed
-of whoever is reading it, or presented to a room at the speed of whoever is
-talking. With no arguments it gives the concise core tour. `--full` adds the
-security, partitioning, refusal, retry and dead-letter deep dives;
-`--section queue`, for example, runs one section independently. `--list`
-prints every section and `--no-pause` makes any form non-interactive.
-
-**Without Docker** it needs Go, to build the broker, and the shared examples
-Python environment, from the repository root:
+## Running the tour
 
 ```sh
 python3 -m venv .venv
@@ -40,80 +15,122 @@ pip install -r examples/requirements.txt
 python examples/demo.py
 ```
 
-It builds the broker, starts it, drives it, and stops it. `make demo` runs the
-same concise path, `make demo-full` runs all of it, and `make demo-server`
-leaves the configured broker running for experimentation.
-
 The concise tour follows broadcast, append, latest, queue success and storage.
-**The full tour walks these in order:**
+It pauses for ENTER on a terminal. `--full` adds the security, partitioning,
+refusal, retry and dead-letter deep dives. `--section queue` selects a section;
+repeat `--section` to select several. `--list` prints the section names, and
+`--no-pause` runs without interaction. The script exits at its first failed
+assertion and stops the broker. The tour uses MQTT acknowledgements, delivered
+messages and receive counts as evidence; the log is written for manual inspection.
 
-| | |
+The script builds the broker through `make build`, starts it with the shipped
+configuration, drives it, and stops it. `--skip-build` uses `bin/saguin` as it
+stands. `make demo` runs the concise tour, `make demo-full` selects the full
+tour, and `make demo-server` stages credentials and leaves the broker running
+for experimentation. These targets use the repository's `.venv` for the tour.
+
+| Section | What it exercises |
 |---|---|
-| Security | A wrong password refused `0x86` and the right one accepted; TLS, with a client that verifies and one that cannot; mutual TLS, where a device authenticates with a certificate and no password at all; the `acl_file` refusing a topic with `0x87`; the WebSocket and Unix listeners |
-| Broadcast | An ordinary MQTT topic no channel claims - and what a subscriber that arrived late does not get |
-| `append` | A durable, replayable event stream: two consumers at their own positions, a replay from the start, and a seek by offset |
-| `latest` | Current value per topic, as a key/value store: set, multi-get on subscribe, a point read, and a delete |
-| `queue` | One worker at a time, with acknowledgement, return, the visibility timeout, retries and dead-lettering - with the seconds printed, because the gaps are the point |
-| Storage | What each kind of storage still holds after a graceful stop and after a kill |
+| Security | Password refusal and acceptance, server verification, a device certificate, ACL grants, WebSocket and Unix connections |
+| Broadcast | Live delivery on topics no configured channel claims, and a new subscriber arriving after publication |
+| Append | Independent consumers, replay, durable positions and seeking by offset |
+| Partitioning | Three readers splitting topics by a declared hash partition |
+| Latest | Replacing current values, subscribing for state, live updates, deletion and point reads |
+| Queue | Exclusive worker offers, application acknowledgement, return, visibility timeout, retries and dead-letter observation |
+| Storage | Publishing markers, stopping and restarting the broker, and counting delivered markers |
 
-**It is a Paho client and nothing else**, which is the point: every step is
-an ordinary publish or a subscription option, and there is no Sagüin SDK.
-Two steps are why it is a library rather than a shell script - the SUBACK
-reason code behind a refused queue subscription, which the command-line
-tools print away, and a queue worker acknowledging, which the broker takes
-only from the session that received the job.
-
-**The broker it runs is a secured one.** All three listeners a broker can
-have are open at once - TLS on TCP, wss on WebSocket, and a Unix socket -
-behind a password file and an `acl_file`. There is no anonymous half:
-authorization is a statement about an identity, and Sagüin refuses an
-`acl_file` beside a listener that admits clients having none.
-
-`make demo-server` starts the same broker against the same configuration and
-leaves it running, for poking at by hand.
+The broker opens TLS TCP on `localhost:8883`, plain TCP on `127.0.0.1:1884`,
+WebSocket over TLS on `localhost:8083`, and `/var/tmp/saguin-demo/saguin.sock`.
+Every listener authenticates. A verified device certificate supplies its
+identity; a client with no certificate uses the password file. The ACL grants
+permissions to that proved identity.
 
 ## The files
 
-**What you run comes first, and `support/` is what those things are built
-from.** Nothing under `support/` is a demo, which is the whole reason it has
-a name: opening this directory should say which is which without reading a
-line of it.
-
-| | |
+| File | Purpose |
 |---|---|
-| `demo.py` | The guided tour |
-| `docker-compose.yml`, `demo.Dockerfile`, `saguin-viewer.yaml` | The guided tour in a container, with nothing installed but Docker, and the viewer watching it |
-| `docker/` | Sagüin and its viewer as published images, for your own devices rather than a demo. Its configuration mounts beside it |
-| `saguin.yaml` | Every key Sagüin accepts, with its default and the reasoning beside it. The tour runs against this file unchanged |
-| `acl.yaml` | What each client may do: roles carrying rules, clients given roles by pattern |
-| `clients.passwd` | Who may connect. Mosquitto's format, hash for hash |
-| `home-automation/` | A stack. Two real gateways, zigbee2mqtt and rtl_433, both stock images unmodified, publishing into Sagüin with no radio hardware at all: an emulated coordinator and an emulated dongle answer where the radios would. Its own README |
-| `bento-connectors/` | A stack. Two Bento pipelines feeding Kafka from MQTT through three Sagüin channels, and Prometheus and Grafana watching the broker carry them - a dashboard covering every metric in the catalogue, drawn against a load nobody shaped to look good on it. It builds Bento from a branch, because the MQTT 5 client it needs is not released yet; its own README says which |
-| `starting-points/` | Three first configurations to adapt - a home hub, an edge gateway bridged to a head office, a fleet broker with TLS and ACLs - each loaded by a test so none goes stale |
-| `support/certs/` | The demo's certificate authority, the broker's certificate, and one device's |
-| `support/channels/presence.yaml` | One channel in a file of its own, because a fleet's channels belong with the team that owns them |
-| `support/storage/durable.yaml` | The same, for a storage provider |
-| `support/worker/` | A queue worker in Go, for reading rather than running: the shape RFC 0003 recommends |
+| `demo.py` | The guided MQTT tour |
+| `saguin.yaml` | The tour's annotated configuration and optional service examples |
+| `acl.yaml` | Roles and grants for the tour and devices |
+| `clients.passwd` | The demonstration user's password hash |
+| `requirements.txt` | The Python dependency, pinned to paho-mqtt 2.1.0 |
+| `starting-points/fleet-broker.yaml` | TLS and per-device grants, events, current status and work; uses `support/fleet-acl.yaml` |
+| `starting-points/home-hub.yaml` | A small password-protected hub with a week of readings, current state and normal-mode storage |
+| `starting-points/plant-gateway.yaml` | TLS devices, a week of local telemetry, setpoints, and an outbound bridge to a head office |
+| `support/certs/` | The public demonstration authority, broker and device certificates and private keys |
+| `support/channels/presence.yaml` | A separately owned channel group included by the tour configuration |
+| `support/storage/durable.yaml` | A standalone normal-mode broker showing commit collection, reader connections and syncing |
 
-## Why the demo copies these to /tmp
+## Paths and configuration checks
 
-**Sagüin refuses a relative path** for `cert_file`, `key_file`,
-`client_ca_file`, `password_file` and `acl_file`, on purpose:
+Sagüin requires absolute file paths, including channel includes. All example
+runtime files use `/var/tmp/saguin-demo/`, the same disk-backed location on
+every machine. The tour stages certificates, the client password file, both
+ACL files, and `channels/presence.yaml` there before starting the broker.
+Each example's database and Unix socket also live there; the tour's log is
+`/var/tmp/saguin-demo/saguin-demo.log`.
 
+Staging gives the shipped configurations absolute paths independent of the
+checkout location. The script runs those configurations directly. The tour
+starts with an empty state directory on each run.
+
+Stage the credentials before checking or starting any configuration:
+
+```sh
+make build
+python3 examples/demo.py --credentials
+bin/saguin --check-config examples/saguin.yaml
+bin/saguin --check-config examples/starting-points/fleet-broker.yaml
+bin/saguin --check-config examples/starting-points/home-hub.yaml
+bin/saguin --check-config examples/starting-points/plant-gateway.yaml
+bin/saguin --check-config examples/support/storage/durable.yaml
 ```
-...tls.cert_file "examples/support/certs/broker.pem" is relative: which
-certificate a listener serves must not depend on where the broker was
-started from
-```
 
-A configuration that ships in a repository therefore cannot name these
-files where they sit, because no absolute path into a checkout is true on
-two machines. So `saguin.yaml` names `/tmp/saguin-demo/...`, and the demo
-copies the files there before it starts. The demo's database and snapshots
-live there for the same reason.
+To run a starting point, use `bin/saguin --config <file>`. Adapt its listeners,
+paths, credentials and retention to your deployment. The plant gateway's
+bridge needs a reachable peer and the appropriate trust and credentials.
 
-A real deployment never meets this: the files are at `/etc/saguin`, an
-operator put them there, and the path is written once.
+The main check also reads its ACL, password file, certificates, keys and
+included channel group. The fleet check reads `support/fleet-acl.yaml`.
+ACLs and channel groups are fragments checked through their broker
+configuration.
+
+The annotated configuration names every key in [config.md](../docs/config.md).
+Compatible settings are active; optional operations and bridge examples and
+mode-specific alternatives are commented. A storage mode accepts only its own
+keys. Use `--check-config <file> --output` to inspect the resolved settings.
+
+## Channels and persistence
+
+The four configured filters divide the same `iot/` hierarchy: events are an
+append log, state and presence hold the latest value per topic, and work is
+a queue. Filters match exactly four levels. A topic such as
+`iot/depot/health/device-1` belongs to `$broadcast`.
+
+All channels share one SQLite store. In this configuration `mode: full`
+syncs every commit, preserving acknowledged writes across crashes and power
+loss. The home hub and standalone storage example use `mode: normal`, which
+preserves acknowledged writes across a process crash; a power cut may lose
+commits since the last completed sync. Memory mode runs on a tmpfs copy and
+restores the last disk snapshot on restart.
+
+New broadcast subscriptions receive retained values and then live messages.
+Durable sessions resume their saved positions. Append readers replay from
+the floor unless configured to start at the tail. Latest subscribers receive
+current values and surviving empty-payload tombstones, then changes. Channel
+deliveries carry RETAIN 0.
+
+Workers subscribe to `$saguin/queue/jobs` at QoS 1 over MQTT 5. A job response
+publishes `ack` or `return` to its Response Topic with its Correlation Data.
+The visibility hold starts at PUBACK; retry delay starts when an attempt ends.
+Queue readers need `read`, separately from worker `consume`. Dead letters go
+to the append channel `jobs__dlq`, with topics prefixed `__dlq/`.
+
+Retention can pass a consumer's position. Logs have age and size retention,
+append channels can have hard size caps, and retained values have their own
+size cap. Size the disk for peak use: SQLite reuses freed pages and retains
+the file's peak size. The [design](../docs/design.md) defines the delivery and
+persistence rules in full.
 
 ## The certificates
 
@@ -132,14 +149,13 @@ what every client verifies the broker against.
 | `device-7.pem`, `device-7-key.pem` | A device. **`CN=device-7` is the whole point**: Sagüin makes a verified certificate's Common Name the client's user name, so this device authenticates with no password and its `acl_file` rule on `%u` matches it |
 | `unrelated-ca.pem` | An authority with no relationship to any of the above, and no key beside it. The tour hands it to a client so the handshake fails - proving the broker is verified rather than describing it |
 
-They expire in 2046. Long-lived deliberately - a demonstration whose
-certificates lapse stops working years later with a TLS error nobody
-connects to the cause. Real certificates should not be issued this way; 825
-days is the usual ceiling, and RFC 0002, under "Client certificates", has
-that recipe.
+The shipped certificates expire in 2046. Long-lived deliberately: a
+demonstration whose certificates lapse stops working years later with a TLS
+error nobody connects to the cause. Real certificates should not be issued
+this way; use shorter lifetimes and your own authority as below.
 
-**How they were made** - openssl 3, and `-copy_extensions` is what carries
-the `subjectAltName` into the signed certificate:
+**Generating demonstration certificates** with OpenSSL 3.
+`-copy_extensions` carries the `subjectAltName` into the signed certificate:
 
 ```sh
 cd examples/support/certs
@@ -177,11 +193,41 @@ openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
 rm -f broker.csr device-7.csr ca.srl
 ```
 
+To make your own certificates with OpenSSL 3, use your broker's real DNS
+name in the subjectAltName and a shorter lifetime:
+
+```sh
+# One authority. It signs both the broker and the device.
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+  -days 825 -nodes -subj "/CN=my-ca" \
+  -keyout ca-key.pem -out ca.pem
+
+# The broker's certificate. The subjectAltName must say what clients dial.
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -subj "/CN=broker.example.com" \
+  -addext "subjectAltName=DNS:broker.example.com" \
+  -keyout broker-key.pem -out broker.csr
+openssl x509 -req -in broker.csr -CA ca.pem -CAkey ca-key.pem \
+  -CAcreateserial -days 825 -copy_extensions copy -out broker.pem
+
+# A device. The Common Name becomes the client's user name.
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+  -subj "/CN=device-7" -keyout device-7-key.pem -out device-7.csr
+openssl x509 -req -in device-7.csr -CA ca.pem -CAkey ca-key.pem \
+  -CAcreateserial -days 825 -out device-7.pem
+
+rm -f broker.csr device-7.csr ca.srl
+```
+
+Keep new `*-key.pem` files out of version control and readable only by the
+account running the broker (`chmod 600`). These commands create your own
+files; they do not replace the shipped demonstration credentials automatically.
+
 ## The password file
 
-`clients.passwd` holds one user, `demo`, whose password is `hunter2`. It is
-Mosquitto's format, hash for hash, so a fleet moving from Mosquitto keeps
-the credentials it has. Written with:
+`clients.passwd` holds one user, `demo`, whose password is `hunter2`.
+Each line is `user:hash`; this file uses PBKDF2-HMAC-SHA512 (`$7$`).
+To set the demonstration password:
 
 ```sh
 saguin --passwd add examples/clients.passwd demo hunter2
@@ -200,25 +246,8 @@ password file, and both work on the same listener.
 saguin --acl examples/saguin.yaml device-7
 ```
 
-```
-user "device-7", against /tmp/saguin-demo/acl.yaml
-
-patterns matched:
-  device-7                 -> device               applies
-  device-*                 -> device               shadowed by "device-7"
-
-Only "device-7" is in force: its roles and its limits are the whole of what this
-client gets, and a shadowed entry adds nothing to them.
-
-publish limits, what this client is held to:
-  messages a second        200        from the acl_file entry "device-7"
-  bytes a second           65536      from the acl_file entry "device-7"
-  note: "device-*" carries limits and matches this client, but "device-7" applies.
-
-effective grants:
-  topic iot/+/health/device-7  write, read  (role device)
-```
-
-The rule is printed **resolved**: `%u` is gone and the device's own name is
-in its place. A `%u` left in that output would be a grant the broker will
-never match.
+The exact `device-7` entry wins over `device-*` and supplies the whole
+entry: its role, client-id constraint and limits of 200 messages/s and
+64KiB/s. The effective broadcast grant is `iot/+/health/device-7` for write
+and read, with `%u` substituted from the verified certificate identity.
+Use `--json` for machine-readable output.

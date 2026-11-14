@@ -1,6 +1,6 @@
 # A fleet broker with TLS and ACLs: tens of thousands of devices, each allowed only its own topics, with events, current status and a work queue.
-# A starting point to adapt, not an answer: paths and sizes are placeholders.
-# A test loads it, so its keys stay valid; the files it names are placeholders.
+# A starting point to adapt. Stage demo credentials first (examples/README.md).
+# Runtime files use /var/tmp/saguin-demo; adapt paths and credentials for deployment.
 
 broker:
   id: fleet-1
@@ -8,38 +8,34 @@ broker:
     listen:
       tcp:
         address: 0.0.0.0:8883
-        # RFC 0002 "TLS on a listener": a fleet reaches the broker over
+        # TLS on a listener: a fleet reaches the broker over
         # networks nobody here controls.
         tls:
-          cert_file: /etc/saguin/tls/cert.pem
-          key_file: /etc/saguin/tls/key.pem
-    password_file: /etc/saguin/clients.passwd
+          cert_file: /var/tmp/saguin-demo/tls/broker.pem
+          key_file: /var/tmp/saguin-demo/tls/broker-key.pem
+    password_file: /var/tmp/saguin-demo/clients.passwd
     allow_anonymous: false
-    # RFC 0002 "What a client may do": each device reaches only its own
+    # ACL grants: each device reaches only its own
     # topics.
-    acl_file: /etc/saguin/acl.yaml
-  # RFC 0002 "The operations listener": metrics and health on loopback.
+    acl_file: /var/tmp/saguin-demo/fleet-acl.yaml
+  # Operations: metrics and health on loopback.
   operations:
     listen:
       tcp:
         address: 127.0.0.1:9090
+  # Three days by age; each channel can set its own size retention.
   storage:
-    default: fleet
-    # RFC 0002 "Retention is stated once": three days by age, with the
-    # bound by size set per channel below.
+    file_path: /var/tmp/saguin-demo/fleet.db
+    mode: full
     default_retention_period: 3d
     default_retention_bytes: none
-    providers:
-      fleet:
-        type: sqlite
-        file_path: /var/lib/saguin/fleet.db
-        max_bytes: 64GiB
+
   limits:
-    # RFC 0002 "How long a socket may wait to send CONNECT": every socket
-    # holds a slot from the moment it arrives, so the fleet plus headroom.
+    # Served connections plus headroom. Excess connections wait unserved;
+    # their CONNECT deadline begins when they receive a service permit.
     max_connections: 50000
-    # RFC 0002 "Channel names" states the 30d default; a day bounds what a
-    # device that never returns keeps owed.
+    # Default 30d; a day bounds sessions of devices that never return.
+    # The channel's retention can pass a session's position meanwhile.
     max_session_expiry: 1d
 channels:
   events:
@@ -56,5 +52,5 @@ channels:
     visibility_timeout: 30s
     retry:
       max_attempts: 5
-      backoff: exponential
-      backoff_base: 2s
+      mode: exponential
+      delay: 2s

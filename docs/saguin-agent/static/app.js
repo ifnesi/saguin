@@ -71,7 +71,7 @@ const QUESTIONS = [
   { group: "Queues and workers", items: [
     "How does a worker acknowledge a job?",
     "What happens when a worker dies holding a job?",
-    "How do retries and backoff work?",
+    "How do retries work, and how long is the wait between attempts?",
     "When does work go to the dead-letter channel?",
     "How do I read the dead-letter channel?",
     "Can two workers get the same job?",
@@ -107,26 +107,24 @@ const QUESTIONS = [
     "What is the largest CONNECT packet saguin accepts?",
     "How do I limit a fleet reconnect storm?",
     "How do I restrict which web pages may use the WebSocket listener?",
-    "Why does same_origin fail behind a TLS-terminating proxy?",
+    "What does the same_origin check compare?",
   ]},
-  { group: "Bridges and the copy", items: [
-    "How do I read another broker into a channel?",
-    "How do I set up a disaster-recovery copy?",
-    "Which end connects, the source or the copy?",
-    "What does a copy not carry?",
-    "How far behind is my copy?",
+  { group: "Bridges", items: [
+    "How do I bring another broker's topics into a channel?",
+    "Which side dials a bridge?",
+    "What does a bridge not carry across?",
+    "How do I tell whether a bridge is connected?",
     "What happens when the link goes down?",
   ]},
   { group: "Operations and storage", items: [
     "How do I monitor saguin with Prometheus?",
     "Which metric should I alert on?",
     "What does /health actually check?",
-    "How do I back up a running broker?",
     "What survives a crash, and a power cut?",
-    "How do I move a channel between memory and SQLite?",
+    "Can an existing database switch between storage modes?",
     "Can I open the SQLite file while the broker runs?",
     "How do I check a configuration without starting the broker?",
-    "How do I enable QoS 2, and where do unfinished publishes wait?",
+    "Is QoS 2 supported, and where do unfinished publishes wait?",
     "Does a refused reconnect cancel an existing delayed Will?",
   ]},
 ];
@@ -246,14 +244,16 @@ function withEmoji(markdown) {
 
 // A heading's id, the way GitHub's own renderer would make one - lowercase,
 // spaces to hyphens, punctuation dropped - because these documents' own
-// cross-links (`docs/invariants.md#invariant-15`) were written expecting
-// that convention, on the assumption GitHub is what renders them. marked
+// cross-links (`storage.md#sagüin-storage`) were written expecting that
+// convention, on the assumption GitHub is what renders them. Letters outside
+// ASCII are kept, as GitHub keeps them: "Sagüin storage" is `sagüin-storage`,
+// and an ASCII-only `\w` would drop the "ü" and miss every such link. marked
 // stopped assigning heading ids itself several major versions back, so
 // without this every anchor in every link is a name nothing in the
 // rendered page actually has.
 function slugify(text) {
   return (text || "").toLowerCase().trim()
-    .replace(/[^\w\- ]+/g, "")
+    .replace(/[^\p{L}\p{N}_\- ]+/gu, "")
     .replace(/\s+/g, "-");
 }
 
@@ -286,10 +286,11 @@ function assignHeadingIds(container) {
 
 // A markdown link's raw href, resolved against the document it was written
 // in - not against this page's URL, which is what the browser would do by
-// default and exactly why these links 404ed. `docs/rfcs/0001-....md` links
-// to `../invariants.md`: relative to *that file's own directory*
-// (`docs/rfcs/`), which resolves to `docs/invariants.md` - never to
-// whatever path this single-page app happens to be serving at the time.
+// default and exactly why these links 404ed. `docs/metrics.md` links to
+// `design.md#rules`: relative to *that file's own directory* (`docs/`),
+// which resolves to `docs/design.md` - never to whatever path this
+// single-page app happens to be serving at the time. The anchor is decoded,
+// since a renderer may percent-encode the "ü" in `#sagüin-storage`.
 // Returns null for anything not ours to handle: an absolute URL, a mailto,
 // anything already outside the relative-path shape a corpus cross-link
 // takes.
@@ -297,7 +298,8 @@ function resolveDocPath(href, baseDoc) {
   if (!href) return null;
   const hashIdx = href.indexOf("#");
   const pathPart = hashIdx === -1 ? href : href.slice(0, hashIdx);
-  const anchor = hashIdx === -1 ? "" : href.slice(hashIdx + 1);
+  let anchor = hashIdx === -1 ? "" : href.slice(hashIdx + 1);
+  try { anchor = decodeURIComponent(anchor); } catch (_) { /* keep it raw */ }
   if (/^[a-z][a-z0-9+.-]*:/i.test(pathPart) || pathPart.startsWith("//")) return null;
   if (pathPart === "") return { path: null, anchor }; // a same-document "#anchor"
   const baseDir = baseDoc ? baseDoc.split("/").slice(0, -1) : [];
@@ -343,7 +345,7 @@ function docLinkHandler(baseDoc, docs, onNavigate, containerRef) {
 
 // The full text of one document, or one reference's excerpt - both shown
 // the same way, both navigable the same way. `chunk.document` is the
-// actual corpus-relative path (`docs/rfcs/0001-....md`); `chunk.citation`
+// actual corpus-relative path (`docs/design.md`); `chunk.citation`
 // is what titles the popup, which for a reference is a heading breadcrumb
 // and for a whole document is the same path.
 //

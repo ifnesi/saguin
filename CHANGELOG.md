@@ -17,6 +17,61 @@ Categories: Added, Changed, Deprecated, Removed, Fixed, Security.
 released, so what is in flight lives in `git log` until it ships under a
 version.
 
+## 0.2.0 - 2026-11-14
+
+A rewrite: no code is carried over from 0.1.0-rc.1, and 0.1.0 never
+shipped as final. An rc.1 configuration that uses a dropped key is
+refused at startup, naming the replacement where there is one
+([docs/config.md, Dropped](docs/config.md#dropped)); an rc.1 database is
+refused at startup, naming both schema versions.
+
+### Added
+
+- `$broadcast`: a topic no channel claims is stored in a reserved
+  `append` channel, whatever its QoS, with one position per session.
+  Retained messages are a flag on its records, with their own size limit
+  and lifetime.
+- Three storage modes for the one SQLite database: `full` (every commit
+  synced before replying, the default), `normal` (synced every
+  `sync_interval`) and `memory` (run from a RAM copy on tmpfs, snapshotted
+  every `snapshot_interval` and at a graceful stop).
+- A restart restores durable sessions' in-flight messages, held incoming
+  QoS 2 exchanges and Wills.
+- Overload slows admission: new publications wait while delivery work for
+  caught-up consumers catches up.
+- `saguin_missed_total`: the records each consumer missed when retention
+  passed it.
+- `saguin --drop-channel`, removing a channel the configuration no longer
+  has; the `saguin-config` skill for AI coding agents.
+
+### Changed
+
+- Storage is one SQLite database under `broker.storage`, with a `mode`,
+  instead of named memory and SQLite providers.
+- A refused `$saguin` request is answered in words (`malformed`,
+  `below-floor`, ...) beside its PUBACK's reason code.
+- A queue's retry is `retry.mode` (`fixed`, `linear`, `exponential`) and
+  `retry.delay`.
+- A consumer's acknowledged position is stored with the next commit.
+- `saguin_channel_consumer_position_min` is now
+  `saguin_channel_position_min`.
+- The design (`docs/design.md`, `config.md`, `metrics.md`, `storage.md`)
+  replaces the RFCs.
+
+### Removed
+
+- `flush_interval`, `session.ack_commit_interval`, and a session's bounded
+  broadcast queue (`limits.session_queue_bytes`, `session_queue_full`).
+- Storage providers. The other dropped keys are listed in
+  [docs/config.md, Dropped](docs/config.md#dropped).
+- Binaries for Linux armv7 and macOS: 0.2.0 ships Linux amd64 and arm64
+  only (see the README's Install).
+
+### Fixed
+
+- A delivery's Message Expiry Interval is the time left when it is sent,
+  after a reconnect too.
+
 ## 0.1.0-rc.1 - 2026-10-04
 
 The first release. Sagüin is a single-node MQTT broker for edge and
