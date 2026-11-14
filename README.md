@@ -1,5 +1,11 @@
 # Sagüin
 
+[![CI](https://github.com/ifnesi/saguin/actions/workflows/ci.yml/badge.svg)](https://github.com/ifnesi/saguin/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/ifnesi/saguin)](https://github.com/ifnesi/saguin/releases/latest)
+[![Go](https://img.shields.io/github/go-mod/go-version/ifnesi/saguin)](go.mod)
+[![licence](https://img.shields.io/github/license/ifnesi/saguin)](LICENSE)
+[![image](https://img.shields.io/badge/image-ghcr.io%2Fifnesi%2Fsaguin-blue)](https://github.com/ifnesi/saguin/pkgs/container/saguin)
+
 <img src="docs/img/saguin_256.png" align="left" alt="Sagüin" width="174" style="padding:16px;">
 
 Sagüin (sah-GWEEN) is a single-node MQTT 3.1.1 and 5 broker for edge and
